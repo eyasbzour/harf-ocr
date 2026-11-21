@@ -1,4 +1,4 @@
-// Seed realistic test drafts into a running DocScan. node seed.js [base]
+// Seed realistic test drafts into a running Harf OCR. node seed.js [base]
 const { chromium } = require('playwright-core');
 const path = require('path');
 const fs = require('fs');

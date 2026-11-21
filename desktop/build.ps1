@@ -2,7 +2,7 @@
 #   .\desktop\build.ps1 -Version 1.0.0            base program: Tesseract + PaddleOCR (Tesseract from $env:TESSERACT_DIR
 #                                                 or C:\Program Files\Tesseract-OCR; the GitHub workflow installs it)
 #   .\desktop\build.ps1 -Version 1.0.0 -Parts     also the optional readers, as zips the installer downloads:
-#                                                 build\out\DocScan-part-heavy.zip and DocScan-part-models.zip
+#                                                 build\out\HarfOCR-part-heavy.zip and HarfOCR-part-models.zip
 # Needs internet (Python, packages, models). The ministry letterhead template is never included.
 param(
     [string]$Version = "0.0.0",
@@ -125,8 +125,8 @@ if ($Parts) {
     # requirements-heavy.txt or the models change)
     Copy-Item (Join-Path $PSScriptRoot "HEAVY_VERSION") (Join-Path $heavy "VERSION")
     # two release assets (each must stay under GitHub's 2 GB): the libraries, and the Nuqta model
-    tar -a -c -f (Join-Path $Out "DocScan-part-heavy.zip") -C $heavy site-packages VERSION
-    tar -a -c -f (Join-Path $Out "DocScan-part-models.zip") -C $models .
+    tar -a -c -f (Join-Path $Out "HarfOCR-part-heavy.zip") -C $heavy site-packages VERSION
+    tar -a -c -f (Join-Path $Out "HarfOCR-part-models.zip") -C $models .
 }
 
 Step "done: $Dist"

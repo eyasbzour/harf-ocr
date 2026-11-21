@@ -1,7 +1,7 @@
-# DocScan: photos of Arabic documents -> reviewed, editable Word/PDF/PNG with an official header template.
-# Build:  docker build -t docscan .                       (Tesseract + Claude + Google Vision)
-#         docker build -t docscan --build-arg WITH_EASYOCR=1 --build-arg WITH_PADDLE=1 --build-arg WITH_NUQTA=1 .   (all engines)
-# Run:    docker run -d -p 8000:8000 -v docscan-data:/app/data -v docscan-templates:/app/templates docscan
+# Harf OCR (حرف): photos of Arabic documents -> reviewed, editable Word/PDF/PNG with an official header template.
+# Build:  docker build -t harf-ocr .                       (Tesseract + Claude + Google Vision)
+#         docker build -t harf-ocr --build-arg WITH_EASYOCR=1 --build-arg WITH_PADDLE=1 --build-arg WITH_NUQTA=1 .   (all engines)
+# Run:    docker run -d -p 8000:8000 -v harf-data:/app/data -v harf-templates:/app/templates harf-ocr
 # bookworm (LibreOffice 7.4): the whole stack, optional engines included, was tested on it
 FROM python:3.12-slim-bookworm
 

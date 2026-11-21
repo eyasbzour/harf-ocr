@@ -1,5 +1,5 @@
-; DocScan installer (Inno Setup 6). Built by the GitHub workflow after desktop\build.ps1:
-;   iscc /DAppVersion=1.0.0 /DHeavyVersion=1 desktop\installer.iss      ->  build\out\DocScan-Setup-1.0.0.exe
+; Harf OCR installer (Inno Setup 6). Built by the GitHub workflow after desktop\build.ps1:
+;   iscc /DAppVersion=1.0.0 /DHeavyVersion=1 desktop\installer.iss      ->  build\out\HarfOCR-Setup-1.0.0.exe
 ; Per-user install (no administrator rights), so updates can run silently. The optional readers (Nuqta and
 ; EasyOCR, about 2 GB) are not inside the setup file: when chosen, they are downloaded from the same release.
 
@@ -9,34 +9,35 @@
 #ifndef HeavyVersion
   #define HeavyVersion "1"
 #endif
-#define Repo "eyasbzour/docscan"
+#define Repo "eyasbzour/harf-ocr"
 #define Release "https://github.com/" + Repo + "/releases/download/v" + AppVersion
 
 [Setup]
 AppId={{6F2B8C4E-1D7A-4E59-9C1B-3A5E7D2F8B90}
-AppName=DocScan
-AppVerName=DocScan {#AppVersion}
+; the AppId, AppMutex and AppUserModelID keep their DocScan-era values: 1.0.2 is updated in place
+AppName=Harf OCR
+AppVerName=Harf OCR {#AppVersion}
 AppVersion={#AppVersion}
-AppPublisher=DocScan
+AppPublisher=Harf OCR
 ; the setup file's own details (Properties > Details); code signing (SignPath) checks the name and version
 VersionInfoVersion={#AppVersion}
-VersionInfoProductName=DocScan
-VersionInfoDescription=DocScan Setup
-VersionInfoCompany=DocScan
+VersionInfoProductName=Harf OCR
+VersionInfoDescription=Harf OCR Setup
+VersionInfoCompany=Harf OCR
 VersionInfoCopyright=MIT License
 AppPublisherURL=https://github.com/{#Repo}
 AppSupportURL=https://github.com/{#Repo}/issues
 AppUpdatesURL=https://github.com/{#Repo}/releases
-DefaultDirName={localappdata}\Programs\DocScan
+DefaultDirName={localappdata}\Programs\Harf OCR
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\build\out
-OutputBaseFilename=DocScan-Setup-{#AppVersion}
+OutputBaseFilename=HarfOCR-Setup-{#AppVersion}
 SetupIconFile=..\build\DocScan\docscan.ico
 UninstallDisplayIcon={app}\docscan.ico
-UninstallDisplayName=DocScan
+UninstallDisplayName=Harf OCR
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMANumBlockThreads=4
@@ -67,7 +68,7 @@ en.Unpacking=Unpacking the extra readers…
 ar.DownloadFailed=تعذر تنزيل القرّاء الإضافيين. يكتمل التثبيت من دونهم، ويمكن تنزيلهم لاحقاً من إعدادات البرنامج.
 en.DownloadFailed=The extra readers could not be downloaded. Setup finishes without them; you can add them later from the program's Settings.
 ar.Open=تشغيل البرنامج
-en.Open=Open DocScan
+en.Open=Open Harf OCR
 
 [Types]
 Name: "full"; Description: "{cm:CoreDesc} + Nuqta + EasyOCR"
@@ -87,10 +88,13 @@ Source: "..\build\DocScan\*"; DestDir: "{app}"; Flags: recursesubdirs createalls
 [InstallDelete]
 ; an update replaces the program's own code; the readers' models and the user's data stay
 Type: filesandordirs; Name: "{app}\app"
+; the shortcuts from when it was called DocScan (1.0.2 and before)
+Type: files; Name: "{autoprograms}\DocScan.lnk"
+Type: files; Name: "{autodesktop}\DocScan.lnk"
 
 [Icons]
-Name: "{autoprograms}\DocScan"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"
-Name: "{autodesktop}\DocScan"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"; Tasks: desktopicon
+Name: "{autoprograms}\Harf OCR"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"
+Name: "{autodesktop}\Harf OCR"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"; Tasks: desktopicon
 
 [Run]
 ; also after a silent update (the program closed itself for it), so it opens again
@@ -128,8 +132,8 @@ begin
   Result := True;
   if (CurPageID = wpReady) and NeedHeavy then begin
     DownloadPage.Clear;
-    DownloadPage.Add('{#Release}/DocScan-part-heavy.zip', 'DocScan-part-heavy.zip', '');
-    DownloadPage.Add('{#Release}/DocScan-part-models.zip', 'DocScan-part-models.zip', '');
+    DownloadPage.Add('{#Release}/HarfOCR-part-heavy.zip', 'HarfOCR-part-heavy.zip', '');
+    DownloadPage.Add('{#Release}/HarfOCR-part-models.zip', 'HarfOCR-part-models.zip', '');
     DownloadPage.Show;
     try
       try
@@ -160,7 +164,7 @@ begin
   if (CurStep = ssPostInstall) and NeedHeavy then begin
     WizardForm.StatusLabel.Caption := CustomMessage('Unpacking');
     DelTree(ExpandConstant('{app}\parts\heavy'), True, True, True);
-    Unpack('DocScan-part-heavy.zip', ExpandConstant('{app}\parts\heavy'));
-    Unpack('DocScan-part-models.zip', ExpandConstant('{app}\models'));
+    Unpack('HarfOCR-part-heavy.zip', ExpandConstant('{app}\parts\heavy'));
+    Unpack('HarfOCR-part-models.zip', ExpandConstant('{app}\models'));
   end;
 end;

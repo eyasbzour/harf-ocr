@@ -1,7 +1,7 @@
 """Updates for the Windows program (desktop/app.py sets DOCSCAN_DESKTOP=1 and DOCSCAN_VERSION).
 
 On start, and from Settings, the program asks GitHub for the latest release. A newer one is offered in the app; installing
-downloads its installer (DocScan-Setup-<version>.exe) and runs it in silent mode, and the program closes so
+downloads its installer (HarfOCR-Setup-<version>.exe; DocScan-Setup-<version>.exe before the rename) and runs it in silent mode, and the program closes so
 the installer can replace it (the installer opens it again). No internet, GitHub down, no release yet:
 nothing is shown. Only the release is fetched; nothing about the user is sent (a generic User-Agent).
 What's new is the version tag's message, which .github/workflows/release.yml puts between NOTES markers.
@@ -16,7 +16,7 @@ import tempfile
 import threading
 import urllib.request
 
-REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/docscan")
+REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 NOTES = re.compile(r"<!-- whats-new -->(.*?)<!-- /whats-new -->", re.S)  # release.yml writes these
 _state: dict = {"checked": False, "info": None}
 
@@ -33,13 +33,13 @@ def check(timeout: float = 5, quiet: bool = True) -> dict | None:
     """The newer release, or None (also when offline, unless quiet is False: then a failure raises)."""
     try:
         req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
-                                     headers={"User-Agent": "DocScan-updater", "Accept": "application/vnd.github+json"})
+                                     headers={"User-Agent": "HarfOCR-updater", "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             rel = json.load(r)
         latest = rel.get("tag_name", "").lstrip("v")
         if not latest or _tuple(latest) <= _tuple(current()):
             return None
-        asset = next((a for a in rel.get("assets", []) if re.match(r"DocScan-Setup-.*\.exe$", a.get("name", ""))), None)
+        asset = next((a for a in rel.get("assets", []) if re.match(r"(HarfOCR|DocScan)-Setup-.*\.exe$", a.get("name", ""))), None)
         if not asset:
             return None
         notes = NOTES.search(rel.get("body") or "")  # none in releases before 1.0.2
@@ -74,8 +74,8 @@ def install(quit_app) -> None:
     info = _state["info"] or check()
     if not info:
         raise RuntimeError("لا يوجد تحديث")
-    path = os.path.join(tempfile.gettempdir(), f"DocScan-Setup-{info['version']}.exe")
-    req = urllib.request.Request(info["url"], headers={"User-Agent": "DocScan-updater"})
+    path = os.path.join(tempfile.gettempdir(), f"HarfOCR-Setup-{info['version']}.exe")
+    req = urllib.request.Request(info["url"], headers={"User-Agent": "HarfOCR-updater"})
     with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:
         while chunk := r.read(1 << 20):
             f.write(chunk)

@@ -3,7 +3,7 @@ import pytest
 
 import convert
 from engines.ai_engines import parse_claude_json
-from engines.common import EngineError, Line, Word, lines_to_blocks, low_note, words_to_segs
+from engines.common import EngineError, Line, Word, clean_word, lines_to_blocks, low_note, words_to_segs
 
 
 def test_low_confidence_run_becomes_one_flag():
@@ -248,3 +248,9 @@ def test_dark_screenshot_of_json_reads_as_code_without_marks():
     # Arabic words on an English line, placed left to right, read right to left
     words = [Word(t, 90, (x, 0, x + 10, 10)) for t, x in [('"21":', 0), ('عنها"', 20), ('يصرح', 40), ('517', 60), ('"ثلاثة', 80), ("}", 100)]]
     assert " ".join(x.text for x in arabic_runs_rtl(words)) == '"21": "ثلاثة 517 يصرح عنها" }'
+
+
+def test_kashida_inside_a_word_goes_but_after_a_prefix_stays():
+    assert clean_word("الــمـوضـوع") == "الموضوع"
+    assert clean_word("بـ") == "بـ"
+    assert clean_word("‏سـلام") == "سلام"

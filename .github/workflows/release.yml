@@ -1,7 +1,8 @@
 # Builds the Windows installer and publishes it as a GitHub Release.
 # Runs on a version tag (git tag v1.0.1 && git push --tags) or by hand (Actions > Windows installer > Run).
-# Release assets: DocScan-Setup-<version>.exe (the program with Tesseract and PaddleOCR) and the optional
-# readers the installer downloads when chosen (DocScan-part-heavy.zip, DocScan-part-models.zip).
+# Release assets: HarfOCR-Setup-<version>.exe (the program with Tesseract and PaddleOCR) and the optional
+# readers the installer downloads when chosen (HarfOCR-part-heavy.zip, HarfOCR-part-models.zip). The installer is also
+# attached as DocScan-Setup-<version>.exe: 1.0.2 and before (the DocScan name) look for that name to update.
 # The installed program checks this repository's latest release at start and offers the update.
 name: Windows installer
 
@@ -32,7 +33,7 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           "heavy=$((Get-Content desktop/HEAVY_VERSION).Trim())" >> $env:GITHUB_OUTPUT
 
-      # what's new: the tag's message without its first line (git tag -a v1.0.2 -m "DocScan 1.0.2" -m "- ..."),
+      # what's new: the tag's message without its first line (git tag -a v1.0.3 -m "Harf OCR 1.0.3" -m "- ..."),
       # read in bash so the Arabic passes through as bytes; checkout leaves the tag object behind, so fetch it
       - name: What's new
         id: notes
@@ -60,24 +61,27 @@ jobs:
           Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/625730370968d1b82a6925f3ac3d671b5aeafb57/Files/Languages/Arabic.isl" -OutFile desktop/Arabic.isl
           & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" "/DHeavyVersion=${{ steps.v.outputs.heavy }}" desktop/installer.iss
           if ($LASTEXITCODE) { throw "installer" }
+          # the same installer under the old name, for 1.0.2 and before to find (server/updater.py there)
+          Copy-Item "build/out/HarfOCR-Setup-${{ steps.v.outputs.version }}.exe" "build/out/DocScan-Setup-${{ steps.v.outputs.version }}.exe"
           Get-ChildItem build/out | Format-Table Name, Length
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.v.outputs.version }}
-          name: DocScan ${{ steps.v.outputs.version }}
+          name: Harf OCR ${{ steps.v.outputs.version }}
           make_latest: true
           files: |
+            build/out/HarfOCR-Setup-*.exe
             build/out/DocScan-Setup-*.exe
-            build/out/DocScan-part-*.zip
+            build/out/HarfOCR-part-*.zip
           # the program shows what is between the whats-new markers (server/updater.py NOTES)
           body: |
             <!-- whats-new -->
             ${{ steps.notes.outputs.notes }}
             <!-- /whats-new -->
 
-            Download **DocScan-Setup-${{ steps.v.outputs.version }}.exe** and run it (Windows 10 or 11, 64-bit; no administrator rights needed).
+            Download **HarfOCR-Setup-${{ steps.v.outputs.version }}.exe** and run it (Windows 10 or 11, 64-bit; no administrator rights needed).
             Setup asks whether to add the Nuqta and EasyOCR readers (about 2 GB, downloaded from this release only when chosen).
             An installed copy finds this release at start and offers to update itself.
 

@@ -1,4 +1,4 @@
-// End-to-end run in real Chrome against a running DocScan: node e2e.js http://localhost:8765
+// End-to-end run in real Chrome against a running Harf OCR: node e2e.js http://localhost:8765
 const { chromium } = require('playwright-core');
 const fs = require('fs');
 const path = require('path');
