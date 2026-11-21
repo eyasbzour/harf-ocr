@@ -1,4 +1,4 @@
-"""DocScan server: reads photographed pages, stores drafts, serves header templates and the web app.
+"""Harf OCR server: reads photographed pages, stores drafts, serves header templates and the web app.
 
 Run:  uvicorn main:app --host 0.0.0.0 --port 8000   (from the server/ folder)
 """
@@ -47,7 +47,7 @@ ID_RE = re.compile(r"^[a-f0-9]{32}$")
 IMG_RE = re.compile(r"^[a-f0-9]{32}\.jpg$")
 TPL_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 
-app = FastAPI(title="DocScan", docs_url=None, redoc_url=None)
+app = FastAPI(title="Harf OCR", docs_url=None, redoc_url=None)
 
 
 # ------------------------------------------------------------------ web files: always the current version
@@ -74,7 +74,7 @@ async def password_gate(request: Request, call_next):
             except Exception:
                 ok = False
         if not ok:
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="DocScan"'})
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Harf OCR"'})
     return await call_next(request)
 
 

@@ -1,5 +1,5 @@
 {
-  "name": "docscan-editor-bundle",
+  "name": "harf-editor-bundle",
   "private": true,
   "description": "Builds web/vendor/tiptap.min.js (the text editor engine) so the app itself needs no build step. Run: npm ci && npm run build",
   "scripts": {

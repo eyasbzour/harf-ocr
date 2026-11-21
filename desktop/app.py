@@ -1,4 +1,5 @@
-"""DocScan as a Windows program.
+"""Harf OCR (حرف) as a Windows program. (It was called DocScan until 1.0.2; the data folder, mutex and
+taskbar ID below keep that name, so an update replaces 1.0.2 in place and keeps its drafts.)
 
 The reader server runs inside this process on a private local port, and a WebView2 window (pywebview, the
 Edge engine built into Windows) shows the app: no browser, no Docker, works offline. Closing the window ends
@@ -27,7 +28,7 @@ HERE = Path(__file__).resolve().parent  # {app}\app\desktop
 APP = HERE.parent                       # {app}\app
 ROOT = APP.parent                       # {app}
 VERSION = (HERE / "VERSION").read_text(encoding="utf-8").strip() if (HERE / "VERSION").exists() else "0.0.0"
-TITLE = "تحويل الوثائق المصوّرة إلى مستندات"
+TITLE = "حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية"
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "DocScan"
 # the same port every start, so the page's address stays the same: its settings (localStorage: theme, name, keys)
 # belong to the address, port included, and a new port each start forgot them. If another program holds it, a free
@@ -65,7 +66,7 @@ p{margin:0 0 18px;color:var(--muted);font-size:13px}
 @media (prefers-reduced-motion:reduce){.beam,.doc i,.bar b{animation:none}.beam{display:none}.bar b{width:100%;opacity:.5}}
 </style></head><body><main>
 <div class="doc" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><div class="beam"></div></div>
-<h1>تحويل الوثائق المصوّرة إلى مستندات</h1><p>جارٍ تشغيل البرنامج…</p>
+<h1>حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية</h1><p>جارٍ تشغيل البرنامج…</p>
 <div class="bar" role="progressbar" aria-label="جارٍ التشغيل"><b></b></div></main></body></html>"""
 
 
@@ -173,7 +174,7 @@ def main() -> None:
     (LOCAL / "logs").mkdir(parents=True, exist_ok=True)
     log = open(LOCAL / "logs" / "docscan.log", "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = log  # pythonw has no console
-    print(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} DocScan {VERSION}")
+    print(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} Harf OCR {VERSION}")
     hide_child_consoles()
     setup()
 

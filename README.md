@@ -1,11 +1,12 @@
-# DocScan: تحويل الوثائق المصوّرة إلى مستندات
+# Harf OCR (حرف): تحويل الوثائق المصوّرة إلى مستندات رقمية
 
-DocScan turns phone photos of Arabic official letters and reports into documents on your office's header template.
+Harf OCR turns phone photos of Arabic documents into editable documents on your office's header template.
 Staff add the photos in order, read them with a free reader on the computer or an AI reader (with their own key),
 check the text next to the photo, and produce the file as Word, PDF, ODT, PNG images or plain text.
 Anything the reader was unsure of is highlighted in the file, with a note saying why.
 
 It runs two ways: as a Windows program (an installer, no browser or server needed) or as a web app on an office server.
+Until version 1.0.2 it was called DocScan; updating from it keeps your drafts and settings.
 
 ![Pages, the photo and its text side by side](docs/screenshots/workspace.png)
 
@@ -70,10 +71,10 @@ The pages in these pictures are made-up test letters.
 
 ## Windows program
 
-Download `DocScan-Setup-<version>.exe` from the [releases](../../releases) and run it. It installs for the current user
+Download `HarfOCR-Setup-<version>.exe` from the [releases](../../releases) and run it. It installs for the current user
 (no administrator rights) with PaddleOCR and Tesseract, and asks whether to add Nuqta and EasyOCR (about 2 GB, downloaded only
 if chosen). If they were skipped, picking either one in the reader list, or الإعدادات > القرّاء الإضافيون, downloads them
-from inside the program. The program opens in its own window; closing it ends it completely. Drafts are kept in `%LOCALAPPDATA%\DocScan`.
+from inside the program. The program opens in its own window; closing it ends it completely. Drafts are kept in `%LOCALAPPDATA%\DocScan` (the folder keeps the old name, so updates find it).
 PDF, ODT and TXT need Microsoft Word or LibreOffice on the computer; Word files (`.docx`) always work.
 
 At start, and from الإعدادات > عن البرنامج, the program checks this repository's latest release and offers to update
@@ -91,17 +92,17 @@ then `iscc /DAppVersion=1.0.0 desktop\installer.iss` with Inno Setup 6. The GitH
 ## Run as a server with Docker
 
 ```bash
-docker build -t docscan .
-docker run -d --name docscan -p 8000:8000 \
-  -v docscan-data:/app/data -v docscan-templates:/app/templates \
+docker build -t harf-ocr .
+docker run -d --name harf-ocr -p 8000:8000 \
+  -v harf-data:/app/data -v harf-templates:/app/templates \
   -e ADMIN_TOKEN=change-me \
-  docscan
+  harf-ocr
 ```
 
 Open `http://SERVER:8000`. This image has Tesseract, LibreOffice and the AI readers (about 1.9 GB). For every free reader:
 
 ```bash
-docker build -t docscan --build-arg WITH_EASYOCR=1 --build-arg WITH_PADDLE=1 --build-arg WITH_NUQTA=1 .
+docker build -t harf-ocr --build-arg WITH_EASYOCR=1 --build-arg WITH_PADDLE=1 --build-arg WITH_NUQTA=1 .
 ```
 
 That image is about 8 GB. The readers' models are downloaded during the build, so the server reads pages without internet.

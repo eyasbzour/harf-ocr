@@ -16,6 +16,9 @@ import numpy as np
 from PIL import Image, ImageOps
 
 BIDI_MARKS = re.compile(r"[‎‏‪-‮⁦-⁩]")
+# kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
+# Only between two letters: the one after a short prefix ("بـ PaddleOCR") is meant.
+KASHIDA = re.compile(r"(?<=[ء-ي])ـ+(?=[ء-ي])")
 HAS_LETTER = re.compile(r"[؀-ۿA-Za-z0-9]")
 CODE = re.compile(r'[{}\[\];]|":|=>')  # what a line of code or JSON has and a letter's line does not
 BULLETS = set("•●▪◦·-–✓✔➢►»«*○■□")  # with how readers misread a bullet ("»" for "•")
@@ -126,7 +129,7 @@ class Line:
 
 
 def clean_word(text: str) -> str:
-    return BIDI_MARKS.sub("", text or "").strip()
+    return KASHIDA.sub("", BIDI_MARKS.sub("", text or "")).strip()
 
 
 def low_note(conf: float) -> str:

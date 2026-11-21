@@ -1,4 +1,4 @@
-/* DocScan: a quiet desk in the manner of macOS Pages and Preview. Gray window chrome, a white page on a gray desk,
+/* Harf OCR: a quiet desk in the manner of macOS Pages and Preview. Gray window chrome, a white page on a gray desk,
    borderless toolbar buttons, segmented controls and one blue accent (the stamp-pad ink). Tokens in OKLCH; neutrals
    tinted toward the accent hue. Radius rule: controls 7px, panels and dialogs 12px, pages 3px, pills full. */
 :root {

@@ -102,7 +102,7 @@ def _free_port() -> int:
 def _download() -> None:
     EXE.parent.mkdir(parents=True, exist_ok=True)
     part = EXE.with_suffix(".part")
-    req = urllib.request.Request(EXE_URL, headers={"User-Agent": "DocScan"})
+    req = urllib.request.Request(EXE_URL, headers={"User-Agent": "HarfOCR"})
     with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
         while chunk := r.read(1 << 20):
             f.write(chunk)

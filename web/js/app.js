@@ -1,4 +1,4 @@
-/* DocScan web app: drafts, page reading, review editor, Word export. */
+/* Harf OCR web app: drafts, page reading, review editor, Word export. */
 (function () {
   'use strict';
 

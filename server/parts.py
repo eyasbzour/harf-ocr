@@ -18,10 +18,10 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/docscan")
+REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
 HEAVY = ROOT / "parts" / "heavy"
-ASSETS = {"DocScan-part-heavy.zip": HEAVY, "DocScan-part-models.zip": ROOT / "models"}
+ASSETS = {"HarfOCR-part-heavy.zip": HEAVY, "HarfOCR-part-models.zip": ROOT / "models"}
 NEED = 7 * 1024 ** 3  # the downloads (about 2 GB) and what they unpack to (about 4 GB), with room to spare
 _state = {"state": "idle", "done": 0, "total": 0, "error": ""}  # idle, downloading, unpacking, done, restart, error
 _lock = threading.Lock()
@@ -57,7 +57,7 @@ def stop() -> None:
 
 
 def _get(url: str):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "DocScan-updater"}), timeout=60)
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "HarfOCR-updater"}), timeout=60)
 
 
 def _run() -> None:

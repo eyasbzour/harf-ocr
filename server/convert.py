@@ -138,7 +138,7 @@ def convert(docx: bytes, fmt: str, base_name: str) -> tuple[bytes, str, str]:
     if fmt == "docx":
         return docx, safe + ".docx", FORMATS["docx"]["mime"]
 
-    with tempfile.TemporaryDirectory(prefix="docscan-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="harf-") as tmp:
         tmp = Path(tmp)
         src = tmp / "document.docx"
         src.write_bytes(docx)
