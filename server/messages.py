@@ -18,8 +18,10 @@ LANG_DIR = Path(__file__).resolve().parent.parent / "web" / "i18n"
 SOURCE = "ar"
 
 
-def languages() -> list[str]:
-    return sorted(p.stem for p in LANG_DIR.glob("*.json"))
+@lru_cache(maxsize=None)
+def languages() -> tuple[str, ...]:
+    """The language files, read once: a new file is picked up when the server starts again."""
+    return tuple(sorted(p.stem for p in LANG_DIR.glob("*.json")))
 
 
 @lru_cache(maxsize=None)

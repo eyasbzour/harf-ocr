@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import os
@@ -14,6 +15,7 @@ import secrets
 import shutil
 import time
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -351,16 +353,29 @@ def _image_path(draft_id: str, name: str) -> Path:
     return p
 
 
+# the drafts list's line for each draft.json, by its path, with the file's (mtime, size) it was read at: a draft file
+# holds every page's text and versions, so it is read again only when it changed
+_SUMMARIES: dict[Path, tuple[tuple[int, int], dict]] = {}
+
+
 @app.get("/api/drafts")
 def list_drafts():
-    items = []
+    items, seen = [], set()
     for f in DRAFTS.glob("*/draft.json"):
         try:
-            d = json.loads(f.read_text(encoding="utf8"))
+            st = f.stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+            hit = _SUMMARIES.get(f)
+            if not hit or hit[0] != stamp:
+                d = json.loads(f.read_text(encoding="utf8"))
+                hit = _SUMMARIES[f] = (stamp, {"id": d["id"], "name": d.get("name", ""), "owner": d.get("owner", ""),
+                                               "updated": d.get("updated", 0), "pages": len(d.get("pages", []))})
         except Exception:
             continue
-        items.append({"id": d["id"], "name": d.get("name", ""), "owner": d.get("owner", ""),
-                      "updated": d.get("updated", 0), "pages": len(d.get("pages", []))})
+        seen.add(f)
+        items.append(hit[1])
+    for gone in set(_SUMMARIES) - seen:  # deleted drafts
+        _SUMMARIES.pop(gone, None)  # another request may have dropped it already
     items.sort(key=lambda x: -x["updated"])
     return {"drafts": items}
 
@@ -553,12 +568,22 @@ def lang_default():
     return Response(body, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/i18n/all.js")
-def all_languages():
-    """Every language file (web/i18n/*.json) as one script, so adding a language is adding its file."""
+@lru_cache(maxsize=1)
+def _all_languages() -> tuple[str, str]:
     body = "".join(f"I18N.add({json.dumps(code)}, {json.dumps({'_meta': meta, **entries}, ensure_ascii=False)});\n"
                    for code in languages() for meta, entries in [language_file(code)])
-    return Response(body, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+    return body, '"' + hashlib.sha1(body.encode("utf-8")).hexdigest()[:16] + '"'
+
+
+@app.get("/i18n/all.js")
+def all_languages(request: Request):
+    """Every language file (web/i18n/*.json) as one script, so adding a language is adding its file. Built once; the
+    browser asks again each load (no-cache) and gets 304 while it has the same one."""
+    body, etag = _all_languages()
+    headers = {"Cache-Control": "no-cache", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="text/javascript", headers=headers)
 
 
 app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

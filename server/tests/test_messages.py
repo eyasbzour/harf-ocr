@@ -214,3 +214,23 @@ def test_limits_in_messages_come_from_their_values():
 def test_plurals_by_language():
     assert render("en", "app.pageCount", n=15) == "15 pages"  # English has no "many"
     assert render("ar", "app.pageCount", n=15) == "15 صفحة"
+
+
+# ---- caching
+def test_all_languages_answers_304_when_unchanged(client):
+    r = client.get("/i18n/all.js")
+    etag = r.headers["etag"]
+    assert r.status_code == 200 and etag
+    r2 = client.get("/i18n/all.js", headers={"If-None-Match": etag})
+    assert r2.status_code == 304 and r2.content == b""
+
+
+def test_drafts_list_follows_changes(client):
+    d = client.post("/api/drafts", json={"name": "first"}).json()
+    names = lambda: {x["id"]: x["name"] for x in client.get("/api/drafts").json()["drafts"]}  # noqa: E731
+    assert names()[d["id"]] == "first"
+    cur = client.get(f"/api/drafts/{d['id']}").json()
+    client.put(f"/api/drafts/{d['id']}", json={**cur, "name": "renamed"})
+    assert names()[d["id"]] == "renamed"
+    client.delete(f"/api/drafts/{d['id']}")
+    assert d["id"] not in names()
