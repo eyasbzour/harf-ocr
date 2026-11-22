@@ -28,7 +28,106 @@
     renderHTML({ HTMLAttributes }) { return ['mark', T.mergeAttributes({ class: 'flag' }, HTMLAttributes), 0]; },
   });
 
-  // a picture cut from the page photo; wFrac = its share of the page width on the photo
+  // a picture (cut from the page photo, pasted or from a file); wFrac = its share of the page width.
+  // wrap, as Word's Layout Options: 'square' | 'tight' | 'through' (the text flows around it, on its side; with
+  // rectangular pictures the three look alike), 'behind' | 'front' (anywhere on the page, at x, y: fractions of the
+  // page width from the text's left edge and from where the picture is in the text; dragged with the mouse), or none:
+  // it stands on its own lines (Word's "Top and Bottom"). "In Line with Text" is a picture inside a line (InlineImage).
+  const SIDE_WRAPS = ['square', 'tight', 'through'], FREE_WRAPS = ['behind', 'front'];
+  // a picture's border, as Word's Picture Border (blocks-doc.js border); the same lines go to Word (docx-export.js)
+  const BORDERS = { single: '1px solid', thick: '3px solid', double: '4px double', dashed: '1.5px dashed', dotted: '2px dotted' };
+  const picAttrs = (wide) => {
+    const data = (name, num) => ({
+      default: num ? 0 : null,
+      parseHTML: (el) => (num ? +el.getAttribute('data-' + name) || 0 : el.getAttribute('data-' + name) || null),
+      renderHTML: () => ({}),
+    });
+    const a = { image: data('image'), w: data('w', true), h: data('h', true), wFrac: data('wfrac', true), border: data('border') };
+    return wide ? Object.assign(a, { align: data('align'), wrap: data('wrap'), x: data('x', true), y: data('y', true) }) : a;
+  };
+  const pct = (a) => Math.round(Math.min(1, a.wFrac || 0.5) * 1000) / 10 + '%';
+
+  // How a picture is drawn in the page, a block one (Figure) or one in a line (InlineImage): a box with the picture
+  // and two handles on its lower corners that resize it, as in Word (its height follows); a free one (behind or in
+  // front of the text) is dragged anywhere by the picture itself.
+  function pictureView(src, inline) {
+    return ({ node, getPos, editor }) => {
+      const dom = document.createElement(inline ? 'span' : 'figure'); dom.className = inline ? 'fig-inline' : 'fig';
+      const box = document.createElement('span'); box.className = 'fig-box';
+      const img = document.createElement('img'); img.alt = inline ? 'صورة في السطر' : 'صورة مدرجة'; img.draggable = false;
+      const handles = ['left', 'right'].map((side) => {
+        const h = document.createElement('span'); h.className = 'fig-handle'; h.dataset.side = side; h.title = 'اسحب لتغيير حجم الصورة';
+        return h;
+      });
+      box.append(img, ...handles); dom.append(box);
+      let cur = node;
+      const free = () => !inline && FREE_WRAPS.includes(cur.attrs.wrap);
+      const side = () => !inline && SIDE_WRAPS.includes(cur.attrs.wrap) && cur.attrs.align !== 'center';  // a centred picture has no side
+      // the width goes on the outer element when it is the one in the text's flow (beside the text, or in a line)
+      const width = (w) => { const out = side() || inline; (out ? dom : box).style.width = w; (out ? box : dom).style.width = out ? '100%' : ''; };
+      const place = (x, y) => { box.style.left = free() ? (x * 100).toFixed(2) + '%' : ''; box.style.marginTop = free() ? (y * 100).toFixed(2) + '%' : ''; };
+      const paint = () => {
+        const a = cur.attrs;
+        Object.assign(dom.dataset, { image: a.image, w: a.w, h: a.h, wfrac: a.wFrac });
+        if (!inline) Object.assign(dom.dataset, { align: a.align || '', wrap: side() ? 'square' : free() ? a.wrap : '' });
+        if (img.getAttribute('src') !== src(a.image)) img.src = src(a.image);
+        img.style.border = BORDERS[a.border] ? BORDERS[a.border] + ' #000' : '';
+        dom.classList.toggle('framed', !!BORDERS[a.border]);
+        width(pct(a));
+        place(a.x, a.y);  // a margin's % is of the width, as y is
+      };
+      paint();
+      const at = () => (typeof getPos === 'function' ? getPos() : null);
+      const done = (attrs) => {
+        const pos = at(); if (pos == null) return;
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, null, Object.assign({}, cur.attrs, attrs)));
+        editor.commands.setNodeSelection(pos);
+      };
+      // a drag with the pointer captured: move(dx, dy) as it goes, end() when let go
+      const drag = (e, move, end) => {
+        e.preventDefault(); e.stopPropagation();
+        const pos = at(); if (pos != null) editor.commands.setNodeSelection(pos);
+        editor.view.focus();  // the default (which focuses the text) was prevented; the picture's tools need it
+        const x0 = e.clientX, y0 = e.clientY, t = e.currentTarget;
+        t.setPointerCapture(e.pointerId);
+        const mv = (ev) => move(ev.clientX - x0, ev.clientY - y0);
+        const up = () => { t.removeEventListener('pointermove', mv); t.removeEventListener('pointerup', up); t.removeEventListener('pointercancel', up); end(); };
+        t.addEventListener('pointermove', mv); t.addEventListener('pointerup', up); t.addEventListener('pointercancel', up);
+      };
+      handles.forEach((h) => h.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const W = (side() ? dom.parentElement : dom.parentElement || dom).clientWidth || 1;
+        const ref = side() || inline ? W : dom.clientWidth || W;  // what the width is a share of
+        const w0 = box.getBoundingClientRect().width, a = cur.attrs, grow = h.dataset.side === 'right' ? 1 : -1;
+        let frac = a.wFrac, x = a.x;
+        drag(e, (dx) => {
+          const w = Math.max(24, Math.min(ref, w0 + grow * dx));
+          frac = +(w / ref).toFixed(3);
+          if (free() && grow < 0) x = a.x + (w0 - w) / ref;  // the right edge stays where it is
+          width((frac * 100).toFixed(1) + '%'); place(x, a.y);
+        }, () => { if (frac !== a.wFrac) done(free() ? { wFrac: frac, x: +x.toFixed(4) } : { wFrac: frac }); });
+      }));
+      // behind or in front of the text: drag it anywhere, as in Word
+      img.addEventListener('pointerdown', (e) => {
+        if (!free() || e.button !== 0) return;
+        const W = dom.clientWidth || 1, a = cur.attrs, w = Math.min(1, a.wFrac || 0.5);
+        let nx = a.x, ny = a.y;
+        drag(e, (dx, dy) => {
+          nx = Math.max(-w / 2, Math.min(1 - w / 2, a.x + dx / W));
+          ny = Math.max(-3, Math.min(3, a.y + dy / W));
+          place(nx, ny);
+        }, () => { if (nx !== a.x || ny !== a.y) done({ x: +nx.toFixed(4), y: +ny.toFixed(4) }); });
+      });
+      return {
+        dom,
+        update(n) { if (n.type !== cur.type) return false; cur = n; paint(); return true; },
+        // the handles, and a free picture, move by their own drag, not the editor's (which moves it in the text)
+        stopEvent: (e) => /^(pointer|mouse|drag)/.test(e.type) && (free() || !!(e.target.closest && e.target.closest('.fig-handle'))),
+        ignoreMutation: () => true,
+      };
+    };
+  }
+
   const Figure = T.Node.create({
     name: 'figure',
     group: 'block',
@@ -36,21 +135,36 @@
     selectable: true,
     draggable: true,
     addOptions() { return { src: (name) => name }; },
-    addAttributes() {
-      const data = (name, num) => ({
-        default: num ? 0 : null,
-        parseHTML: (el) => (num ? +el.getAttribute('data-' + name) || 0 : el.getAttribute('data-' + name) || null),
-        renderHTML: () => ({}),
-      });
-      return { image: data('image'), w: data('w', true), h: data('h', true), wFrac: data('wfrac', true), align: data('align') };
-    },
+    addAttributes() { return picAttrs(true); },
     parseHTML() { return [{ tag: 'figure.fig' }]; },
+    // the HTML of a copied picture; on the page it is drawn by pictureView
     renderHTML({ node }) {
       const a = node.attrs;
-      return ['figure', { class: 'fig', 'data-image': a.image, 'data-w': a.w, 'data-h': a.h, 'data-wfrac': a.wFrac, 'data-align': a.align || '' },
-        ['img', { src: this.options.src(a.image), alt: 'صورة مدرجة من الصفحة', draggable: 'false',
-          style: 'width:' + Math.round(Math.min(1, a.wFrac || 0.5) * 100) + '%' }]];
+      return ['figure', { class: 'fig', 'data-image': a.image, 'data-w': a.w, 'data-h': a.h, 'data-wfrac': a.wFrac, 'data-align': a.align || '',
+        'data-wrap': a.wrap || '', 'data-x': a.x, 'data-y': a.y, 'data-border': a.border || '' },
+        ['img', { src: this.options.src(a.image), alt: 'صورة مدرجة', draggable: 'false', style: 'width:' + pct(a) }]];
     },
+    addNodeView() { return pictureView(this.options.src, false); },
+  });
+
+  // Word's "In Line with Text": a picture inside a line of text, which moves with it and can be dragged to any
+  // place in a sentence
+  const InlineImage = T.Node.create({
+    name: 'inlineImage',
+    group: 'inline',
+    inline: true,
+    atom: true,
+    selectable: true,
+    draggable: true,
+    addOptions() { return { src: (name) => name }; },
+    addAttributes() { return picAttrs(false); },
+    parseHTML() { return [{ tag: 'img.fig-inline' }]; },
+    renderHTML({ node }) {
+      const a = node.attrs;
+      return ['img', { class: 'fig-inline', src: this.options.src(a.image), alt: 'صورة في السطر', 'data-image': a.image, 'data-w': a.w, 'data-h': a.h,
+        'data-wfrac': a.wFrac, 'data-border': a.border || '', style: 'width:' + pct(a) }];
+    },
+    addNodeView() { return pictureView(this.options.src, true); },
   });
 
   // borderless: a text row kept apart in parts ("الرقم ... التاريخ"); lineless: a data table printed without lines
@@ -94,6 +208,27 @@
         default: null,
         parseHTML: (el) => (el.getAttribute('dir') === 'ltr' ? 'ltr' : null),
         renderHTML: (a) => (a.dir === 'ltr' ? { dir: 'ltr' } : {}),
+      } } }, { types: ['paragraph', 'heading'], attributes: {
+        // line spacing as Word counts it (1 = single); the page shows Word's usual 1.25 at its own 2
+        lineHeight: { default: null, parseHTML: (el) => +el.dataset.lh || null,
+          renderHTML: (a) => (a.lineHeight ? { 'data-lh': a.lineHeight, style: 'line-height:' + (1.6 * a.lineHeight).toFixed(2) } : {}) },
+        // space before / after the paragraph, in points (none: the page's usual)
+        spaceBefore: { default: null, parseHTML: (el) => (el.dataset.sb != null ? +el.dataset.sb : null),
+          renderHTML: (a) => (a.spaceBefore != null ? { 'data-sb': a.spaceBefore, style: 'margin-top:' + a.spaceBefore + 'pt' } : {}) },
+        spaceAfter: { default: null, parseHTML: (el) => (el.dataset.sa != null ? +el.dataset.sa : null),
+          renderHTML: (a) => (a.spaceAfter != null ? { 'data-sa': a.spaceAfter, style: 'margin-bottom:' + a.spaceAfter + 'pt' } : {}) },
+      } }, { types: ['bulletList', 'orderedList'], attributes: { listStyle: {  // blocks-doc.js ls
+        default: null,
+        parseHTML: (el) => el.dataset.ls || null,
+        renderHTML: (a) => (a.listStyle ? { 'data-ls': a.listStyle } : {}),
+      } } }, { types: ['listItem'], attributes: { fixedDir: {  // its side was set by hand: its first letter no longer decides
+        default: false,
+        parseHTML: (el) => el.hasAttribute('data-fixed-dir'),
+        renderHTML: (a) => (a.fixedDir ? { 'data-fixed-dir': '' } : {}),
+      }, dir: {  // its side, from its own first letter (the plugin below)
+        default: null,
+        parseHTML: (el) => (['ltr', 'rtl'].includes(el.getAttribute('dir')) ? el.getAttribute('dir') : null),
+        renderHTML: (a) => (a.dir ? { dir: a.dir } : {}),
       } } }];
     },
     // where each line starts follows the text as it is edited, so the line read again is still that line
@@ -140,6 +275,26 @@
           });
           return tr;
         },
+      }), new T.Plugin({
+        // a list item starts on the side of its first letter, as a Word paragraph does: an English item left to
+        // right on an Arabic page, its marker on the left; an item with no letter yet, or one whose side was set by
+        // hand (the direction button), keeps the side it has
+        appendTransaction(trs, before, after) {
+          if (!trs.some((t) => t.docChanged)) return null;
+          let tr = null;
+          after.doc.descendants((node, pos) => {
+            if (node.type.name !== 'listItem') return !node.isTextblock;
+            if (node.attrs.fixedDir) return true;
+            const first = node.firstChild;
+            const side = first && first.isTextblock ? window.BlocksDoc.startDir(first.textContent) : null;
+            if (!side) return true;
+            if (node.attrs.dir !== side) { tr = tr || after.tr; tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { dir: side })); }
+            const pdir = side === 'ltr' ? 'ltr' : null;
+            if (first.attrs.dir !== pdir) { tr = tr || after.tr; tr.setNodeMarkup(pos + 1, null, Object.assign({}, first.attrs, { dir: pdir })); }
+            return true;  // and the lists inside it
+          });
+          return tr;
+        },
       })];
     },
   });
@@ -163,7 +318,7 @@
         T.TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['right', 'center', 'left', 'justify'] }),
         Table, T.TableRow, T.TableHeader, TableCell,
         T.TextStyle, T.Color, T.BackgroundColor, T.FontSize,
-        Figure.configure({ src: opts.src }),
+        Figure.configure({ src: opts.src }), InlineImage.configure({ src: opts.src }),
         Flag, BlockBox,
       ],
       content: window.BlocksDoc.blocksToDoc(blocks),
@@ -234,23 +389,103 @@
         return editor.isActive({ textAlign: side });
       },
 
-      // left to right (English) or right to left, for the paragraphs, lists and tables in the selection
-      isLtr() {
+      // the list the cursor is in: { depth, node, kind: 'bullet' | 'number', style }, or null
+      listAt() {
         const { $from } = editor.state.selection;
-        for (let d = $from.depth; d > 0; d--) if ($from.node(d).attrs.dir === 'ltr') return true;
+        for (let d = $from.depth; d > 0; d--) {
+          const n = $from.node(d);
+          if (n.type.name === 'bulletList' || n.type.name === 'orderedList') return { depth: d, node: n, kind: n.type.name === 'bulletList' ? 'bullet' : 'number', style: n.attrs.listStyle || null };
+        }
+        return null;
+      },
+      // Word's bullets and numbering in one: kind 'bullet' | 'number' with a style (null: the plain one), or no
+      // kind to end the list; the style is the list's at the cursor's level, as in Word
+      setList(kind, style) {
+        const at = this.listAt();
+        const toggle = (k) => focused()[k === 'bullet' ? 'toggleBulletList' : 'toggleOrderedList']().run();
+        if (!kind) { if (at) toggle(at.kind); return; }
+        if (!at || at.kind !== kind) toggle(kind);
+        const now = this.listAt();
+        if (!now || (now.node.attrs.listStyle || null) === (style || null)) return;
+        const st = editor.state;
+        editor.view.dispatch(st.tr.setNodeMarkup(st.selection.$from.before(now.depth), null, Object.assign({}, now.node.attrs, { listStyle: style || null })));
+        editor.view.focus();
+      },
+      canList() { return !figureSelected() && (!!this.listAt() || editor.can().toggleBulletList()); },
+
+      // the paragraph at the cursor's spacing: { lineHeight, spaceBefore, spaceAfter } (null: the usual)
+      spacing() {
+        const p = editor.state.selection.$from.parent;
+        return p.isTextblock ? { lineHeight: p.attrs.lineHeight || null, spaceBefore: p.attrs.spaceBefore, spaceAfter: p.attrs.spaceAfter } : null;
+      },
+      // for every paragraph and heading in the selection
+      setSpacing(attrs) {
+        const st = editor.state, tr = st.tr, { from, to } = st.selection;
+        st.doc.nodesBetween(from, to, (node, pos) => {
+          if (node.type.name === 'paragraph' || node.type.name === 'heading') tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, attrs));
+        });
+        editor.view.dispatch(tr);
+        editor.view.focus();
+      },
+
+      // the selected picture's wrap ('inline' for a picture in a line, the Figure wraps, or null) and width (wFrac)
+      figure() {
+        if (editor.isActive('inlineImage')) return Object.assign({}, editor.getAttributes('inlineImage'), { wrap: 'inline' });
+        return figureSelected() ? editor.getAttributes('figure') : null;
+      },
+      // { wrap } and / or { wFrac } for the selected picture; into a line and out of it, it becomes the other node
+      setFigure(attrs) {
+        const st = editor.state, sel = st.selection, node = sel.node;
+        if (!node || !['figure', 'inlineImage'].includes(node.type.name)) return;
+        const pic = { image: node.attrs.image, w: node.attrs.w, h: node.attrs.h, wFrac: attrs.wFrac || node.attrs.wFrac,
+          border: 'border' in attrs ? attrs.border : node.attrs.border };
+        const select = (tr, pos) => { editor.view.dispatch(tr); editor.commands.setNodeSelection(pos); editor.view.focus(); };
+        if (node.type.name === 'inlineImage') {
+          if (!('wrap' in attrs) || attrs.wrap === 'inline') { focused().updateAttributes('inlineImage', { wFrac: pic.wFrac, border: pic.border }).run(); return; }
+          // out of the line: a picture of its own right after the paragraph it was in
+          const at = sel.$from.after();
+          const fig = st.schema.nodes.figure.create(Object.assign(pic, { wrap: attrs.wrap }, this.freePlace(attrs.wrap, pic.wFrac, null)));
+          select(st.tr.insert(at, fig).delete(sel.from, sel.to), at - (sel.to - sel.from));
+          return;
+        }
+        if (attrs.wrap === 'inline') {
+          // into the text: at the start of the paragraph after it, or in a line of its own
+          const img = st.schema.nodes.inlineImage.create(pic), next = st.doc.resolve(sel.to).nodeAfter;
+          const tr = next && next.type.name === 'paragraph' ? st.tr.insert(sel.to + 1, img).delete(sel.from, sel.to)
+            : st.tr.replaceWith(sel.from, sel.to, st.schema.nodes.paragraph.create(null, img));
+          select(tr, sel.from + 1);
+          return;
+        }
+        const a = node.attrs, upd = Object.assign({}, attrs);
+        if (SIDE_WRAPS.includes(attrs.wrap) && a.align === 'center') upd.align = null;
+        if (FREE_WRAPS.includes(attrs.wrap) && !FREE_WRAPS.includes(a.wrap)) Object.assign(upd, this.freePlace(attrs.wrap, pic.wFrac, a.align));
+        focused().updateAttributes('figure', upd).run();
+      },
+      // where a picture turned free (behind or in front of the text) starts: where it stood, at the top
+      freePlace(wrap, wFrac, align) {
+        if (!FREE_WRAPS.includes(wrap)) return {};
+        const w = Math.min(1, wFrac || 0.5);
+        return { x: +(align === 'end' ? 0 : align === 'center' ? (1 - w) / 2 : 1 - w).toFixed(4), y: 0 };
+      },
+
+      // left to right (English) or right to left, for the paragraphs, lists and tables in the selection
+      isLtr() {  // the nearest side set: a list item's 'rtl' counts, inside a left-to-right list
+        const { $from } = editor.state.selection;
+        for (let d = $from.depth; d > 0; d--) { const dir = $from.node(d).attrs.dir; if (dir) return dir === 'ltr'; }
         return false;
       },
       toggleDir() {
         const to = this.isLtr() ? null : 'ltr';
         const st = editor.state, tr = st.tr, { from, to: end } = st.selection;
-        const types = ['paragraph', 'heading', 'bulletList', 'orderedList', 'table'];
-        st.doc.nodesBetween(from, end, (node, pos) => {
-          if (types.includes(node.type.name)) tr.setNodeMarkup(pos, null, Object.assign({}, node.attrs, { dir: to }));
-        });
-        const { $from } = st.selection;  // and the list or table the cursor is in
+        const types = ['paragraph', 'heading', 'bulletList', 'orderedList', 'table', 'listItem'];
+        // a list item keeps the side set by hand, its marker moving with it
+        const set = (n, pos) => tr.setNodeMarkup(pos, null, Object.assign({}, n.attrs,
+          n.type.name === 'listItem' ? { dir: to || 'rtl', fixedDir: true } : { dir: to }));
+        st.doc.nodesBetween(from, end, (node, pos) => { if (types.includes(node.type.name)) set(node, pos); });
+        const { $from } = st.selection;  // and the list item, list or table the cursor is in
         for (let d = $from.depth; d > 0; d--) {
           const n = $from.node(d);
-          if (types.includes(n.type.name) && d < $from.depth) tr.setNodeMarkup($from.before(d), null, Object.assign({}, n.attrs, { dir: to }));
+          if (types.includes(n.type.name) && d < $from.depth) set(n, $from.before(d));
         }
         editor.view.dispatch(tr);
         editor.commands.focus();
@@ -391,7 +626,7 @@
       b.addEventListener('mousedown', (e) => e.preventDefault());  // keep the text selection
       b.addEventListener('click', () => { const pe = get(); if (pe || o.always) o.run(pe); });
       g.append(b);
-      items.push({ node: b, on: o.on, enabled: o.enabled, show: o.show, always: o.always });
+      items.push({ node: b, on: o.on, enabled: o.enabled, show: o.show, always: o.always, iconOf: o.iconOf });
       return b;
     };
     const can = (pe, fn) => { try { return fn(pe.editor.can().chain().focus()).run(); } catch (e) { return false; } };
@@ -406,19 +641,22 @@
       btn.setAttribute('aria-expanded', 'false');
       if (actions.slideOut) actions.slideOut(pop, () => pop.remove()); else pop.remove();
     };
-    const popover = (btn, build) => {
+    const popover = (btn, build, always) => {
       btn.setAttribute('aria-haspopup', 'dialog'); btn.setAttribute('aria-expanded', 'false');
       btn.addEventListener('click', () => {
         const again = open && open.btn === btn;
         closePop();
-        if (again || !get()) return;
+        if (again || (!get() && !always)) return;
         const pop = document.createElement('div');
         pop.className = 'tb-pop'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', btn.getAttribute('aria-label'));
         build(pop);
         document.body.append(pop);
         if (!phone()) {
-          const r = btn.getBoundingClientRect();
-          pop.style.top = (r.bottom + 4) + 'px';
+          // under the button, or over it when there is more room there; a long menu scrolls inside the window
+          const r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 12, above = r.top - 12;
+          const up = pop.offsetHeight > below && above > below;
+          pop.style.maxHeight = (up ? above : below) + 'px';
+          pop.style.top = (up ? Math.max(8, r.top - 4 - pop.offsetHeight) : r.bottom + 4) + 'px';
           pop.style.left = Math.max(8, Math.min(r.right - pop.offsetWidth, innerWidth - pop.offsetWidth - 8)) + 'px';
         }
         btn.setAttribute('aria-expanded', 'true');
@@ -469,25 +707,26 @@
       c.run();
     });
     style.append(sel);
-    // text size in points, like Word: pick from the list or type any size
-    const size = document.createElement('input');
-    size.type = 'text'; size.inputMode = 'decimal'; size.className = 'tb-size';
-    size.placeholder = 'حجم'; size.title = 'حجم النص المحدد (نقطة)'; size.setAttribute('aria-label', 'حجم النص المحدد بالنقاط');
-    size.setAttribute('list', 'tbSizes');
-    const sizes = document.createElement('datalist'); sizes.id = 'tbSizes';
-    [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72].forEach((n) => { const o = document.createElement('option'); o.value = n; sizes.append(o); });
-    const applySize = () => {
+    // text size in points: a plain list of Word's sizes ("تلقائي": the document's own size); a size the text
+    // already has that is not in the list (a pasted 15) shows as one more choice
+    const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
+    const size = document.createElement('select');
+    size.className = 'tb-size'; size.title = 'حجم النص المحدد (نقطة)'; size.setAttribute('aria-label', 'حجم النص المحدد بالنقاط');
+    const sizeOpt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; };
+    const sizeList = (extra) => size.replaceChildren(sizeOpt('', 'تلقائي'),
+      ...SIZES.concat(extra && !SIZES.includes(+extra) ? [+extra] : []).sort((x, y) => x - y).map((n) => sizeOpt(String(n), String(n))));
+    sizeList();
+    size.addEventListener('change', () => {
       const pe = get(); if (!pe) return;
       const n = parseFloat(size.value);
       if (n >= 6 && n <= 96) pe.chain().setFontSize(n + 'pt').run(); else pe.chain().unsetFontSize().run();
-    };
-    size.addEventListener('change', applySize);
-    size.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applySize(); } });
-    style.append(size, sizes);
+    });
+    style.append(size);
     items.push({ node: size, enabled: (pe) => !pe.editor.isActive('figure'), value: (pe) => {
-      if (document.activeElement === size) return size.value;  // do not overwrite while typing
       const m = String(pe.editor.getAttributes('textStyle').fontSize || '').match(/^([\d.]+)(pt|px)?$/);
-      return m ? String(m[2] === 'px' ? Math.round(+m[1] * 1.5) / 2 : +m[1]) : '';
+      const v = m ? String(m[2] === 'px' ? Math.round(+m[1] * 1.5) / 2 : +m[1]) : '';
+      if (v && ![...size.options].some((o) => o.value === v)) sizeList(v);
+      return v;
     } });
     items.push({ node: sel, enabled: (pe) => !pe.editor.isActive('figure'), value: (pe) => {
       if (pe.editor.isActive('blockquote')) return 'q';
@@ -509,11 +748,68 @@
     button(fmt, { icon: 'eraser', label: 'إزالة التنسيق (يبقى التعليم)', run: (pe) => pe.chain().unsetBold().unsetItalic().unsetUnderline().unsetStrike()
       .unsetColor().unsetBackgroundColor().unsetFontSize().run() });
 
+    // a menu of rows (line spacing, wrap): [label, chosen?, run]; a row with no run is a heading, and
+    // ['chips', [[label, chosen, run], ...]] a row of small buttons (a picture's width, its border)
+    const menu = (pop, rows) => {
+      const m = document.createElement('div'); m.className = 'tb-menu';
+      rows.forEach(([label, chosen, run]) => {
+        if (label === 'chips') {
+          const c = document.createElement('div'); c.className = 'menu-chips';
+          chosen.forEach(([l, on, go]) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'menu-chip' + (on ? ' on' : ''); b.textContent = l; b.setAttribute('aria-pressed', String(!!on));
+            b.addEventListener('click', () => { go(get()); closePop(); closeDrops(); });
+            c.append(b);
+          });
+          m.append(c);
+          return;
+        }
+        if (!run) { const h = document.createElement('h5'); h.textContent = label; m.append(h); return; }
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'menu-row' + (chosen ? ' on' : ''); b.setAttribute('aria-pressed', String(!!chosen));
+        b.append(icon('check'), document.createTextNode(label));
+        b.addEventListener('click', () => { run(get()); closePop(); closeDrops(); });
+        m.append(b);
+      });
+      pop.append(m);
+    };
+
+    // Word's bullet and numbering libraries in one menu: each tile shows three lines of the list
+    const BULLETS = [[null, '•', 'نقطة'], ['circle', '○', 'دائرة'], ['square', '■', 'مربع'], ['diamond', '◆', 'معيّن'], ['arrow', '➢', 'سهم'], ['check', '✓', 'علامة صح']];
+    const NUMBERS = [[null, ['1.', '2.', '3.'], 'أرقام'], ['hindi', ['١.', '٢.', '٣.'], 'أرقام هندية'], ['alpha-ar', ['أ.', 'ب.', 'ت.'], 'حروف عربية'],
+      ['paren', ['1)', '2)', '3)'], 'أرقام وقوس'], ['lower', ['a.', 'b.', 'c.'], 'حروف لاتينية صغيرة'], ['upper', ['A.', 'B.', 'C.'], 'حروف لاتينية كبيرة'],
+      ['roman', ['i.', 'ii.', 'iii.'], 'أرقام رومانية']];
+    const listMenu = (pop) => {
+      const at = get().listAt();
+      const lib = (name, kind, styles) => {
+        const grid = document.createElement('div'); grid.className = 'ls-grid';
+        styles.forEach(([style, marks, label]) => {
+          const b = document.createElement('button');
+          const on = !!at && at.kind === kind && at.style === style;
+          b.type = 'button'; b.className = 'ls-tile' + (on ? ' on' : ''); b.title = label; b.setAttribute('aria-label', label); b.setAttribute('aria-pressed', String(on));
+          [0, 1, 2].forEach((k) => {
+            const r = document.createElement('span'); r.className = 'ls-row';
+            const mk = document.createElement('span'); mk.className = 'ls-mk'; mk.textContent = Array.isArray(marks) ? marks[k] : marks;
+            const bar = document.createElement('span'); bar.className = 'ls-bar';
+            r.append(mk, bar); b.append(r);
+          });
+          b.addEventListener('click', () => { get().setList(kind, style); closePop(); closeDrops(); });
+          grid.append(b);
+        });
+        const h = document.createElement('h5'); h.textContent = name;
+        pop.append(h, grid);
+      };
+      lib('تعداد نقطي', 'bullet', BULLETS);
+      lib('ترقيم', 'number', NUMBERS);
+      const none = document.createElement('button');
+      none.type = 'button'; none.className = 'pal-none'; none.textContent = 'بلا قائمة'; none.disabled = !at;
+      none.addEventListener('click', () => { get().setList(null); closePop(); closeDrops(); });
+      pop.append(none);
+    };
+    const listOn = (pe) => !!pe.listAt();
     const list = group();
-    button(list, { icon: 'list-bullets', label: 'قائمة نقطية', keys: 'Ctrl+Shift+8', run: (pe) => pe.chain().toggleBulletList().run(),
-      on: (pe) => pe.editor.isActive('bulletList'), enabled: (pe) => can(pe, (c) => c.toggleBulletList()) });
-    button(list, { icon: 'list-numbers', label: 'قائمة مرقمة', keys: 'Ctrl+Shift+7', run: (pe) => pe.chain().toggleOrderedList().run(),
-      on: (pe) => pe.editor.isActive('orderedList'), enabled: (pe) => can(pe, (c) => c.toggleOrderedList()) });
+    const listIcon = (pe) => ((pe.listAt() || {}).kind === 'number' ? 'list-numbers' : 'list-bullets');  // the kind in use
+    popover(button(list, { icon: 'list-bullets', label: 'التعداد النقطي والترقيم', run: () => {}, on: listOn, iconOf: listIcon, enabled: (pe) => pe.canList() }), listMenu);
     // pages are right to left: indenting moves the item left, so the arrows point that way
     button(list, { icon: 'text-outdent', label: 'إنقاص المسافة البادئة', keys: 'Shift+Tab', run: (pe) => pe.chain().liftListItem('listItem').run(),
       enabled: (pe) => can(pe, (c) => c.liftListItem('listItem')) });
@@ -527,6 +823,20 @@
     });
     button(align, { icon: 'arrows-left-right', label: 'اتجاه الفقرة: من اليسار (إنجليزي) أو من اليمين', run: (pe) => pe.toggleDir(),
       on: (pe) => pe.isLtr(), enabled: (pe) => !pe.editor.isActive('figure') });
+    // Word's line and paragraph spacing menu; 1.25 is what a paragraph has until it is given another
+    popover(button(align, { icon: 'arrows-out-line-vertical', label: 'تباعد الأسطر والفقرات', run: () => {}, enabled: (pe) => !!pe.spacing() }), (pop) => {
+      const sp = get().spacing() || {};
+      const rows = [['تباعد الأسطر']];
+      [[1, '1.0'], [1.15, '1.15'], [null, '1.25 (المعتاد)'], [1.5, '1.5'], [2, '2.0'], [2.5, '2.5'], [3, '3.0']].forEach(([v, label]) => {
+        rows.push([label, (sp.lineHeight || null) === v, (pe) => pe.setSpacing({ lineHeight: v })]);
+      });
+      rows.push(['الفقرة']);
+      rows.push(sp.spaceBefore ? ['إزالة المسافة قبل الفقرة', false, (pe) => pe.setSpacing({ spaceBefore: null })]
+        : ['إضافة مسافة قبل الفقرة', false, (pe) => pe.setSpacing({ spaceBefore: 12 })]);
+      rows.push(sp.spaceAfter === 0 ? ['إضافة مسافة بعد الفقرة', false, (pe) => pe.setSpacing({ spaceAfter: null })]
+        : ['إزالة المسافة بعد الفقرة', false, (pe) => pe.setSpacing({ spaceAfter: 0 })]);
+      menu(pop, rows);
+    });
 
     const ins = group();
     const insertTable = (rows, cols) => {
@@ -565,8 +875,10 @@
       custom.append(go);
       pop.append(label, grid, custom);
     });
-    button(ins, { icon: 'images', text: 'صورة', label: 'إدراج جزء من صورة الصفحة (شعار، رسم، توقيع)', run: () => actions.picture(), always: true,
-      enabled: () => actions.hasPage() });
+    popover(button(ins, { icon: 'images', text: 'صورة', label: 'إدراج صورة', run: () => {}, always: true, enabled: () => actions.hasPage() }), (pop) => {
+      menu(pop, [['صورة من الجهاز…', false, () => actions.pickImage()],
+        ['جزء من صورة الصفحة (شعار، رسم، توقيع)', false, () => actions.picture()]]);
+    }, true);
     const flagBtn = button(ins, { icon: 'flag', text: 'تعليم', label: 'تعليم النص المحدد كملاحظة', run: () => actions.flag(), always: true, enabled: (pe) => !!pe });
     const insOwn = [...ins.children];
 
@@ -650,7 +962,7 @@
     const isCells = (pe) => '$anchorCell' in pe.editor.state.selection;  // several table cells selected
     const mode = (pe) => {
       if (!pe || !working(pe)) return null;
-      if (pe.editor.isActive('figure')) return 'figure';
+      if (pe.editor.isActive('figure') || pe.editor.isActive('inlineImage')) return 'figure';
       if (pe.editor.isActive('table') && (pe.editor.state.selection.empty || isCells(pe))) return 'table';
       return pe.editor.state.selection.empty ? null : 'text';
     };
@@ -662,8 +974,7 @@
         const cap = mark[0].toUpperCase() + mark.slice(1);
         button(ft, { icon: ic, label, run: (pe) => pe.chain()['toggle' + cap]().run(), on: (pe) => pe.editor.isActive(mark), show: when('text') });
       });
-    button(ft, { icon: 'list-bullets', label: 'قائمة نقطية', run: (pe) => pe.chain().toggleBulletList().run(), on: (pe) => pe.editor.isActive('bulletList'), show: when('text') });
-    button(ft, { icon: 'list-numbers', label: 'قائمة مرقمة', run: (pe) => pe.chain().toggleOrderedList().run(), on: (pe) => pe.editor.isActive('orderedList'), show: when('text') });
+    popover(button(ft, { icon: 'list-bullets', label: 'التعداد النقطي والترقيم', run: () => {}, on: listOn, iconOf: listIcon, show: when('text'), enabled: (pe) => pe.canList() }), listMenu);
     button(ft, { icon: 'flag', text: 'تعليم', label: 'تعليم كملاحظة', run: () => actions.flag(), always: true, show: when('text') });
 
     const inTable = when('table');
@@ -681,6 +992,24 @@
     [['right', 'text-align-right', 'الصورة لليمين'], ['center', 'text-align-center', 'الصورة في الوسط'], ['left', 'text-align-left', 'الصورة لليسار']].forEach(([a, ic, label]) => {
       button(ft, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), show: onFig });
     });
+    // Word's Layout Options: how the text goes with the picture, and its width on the page
+    popover(button(ft, { icon: 'text-columns', text: 'التفاف', label: 'التفاف النص وحجم الصورة وإطارها', run: () => {}, show: onFig }), (pop) => {
+      const f = get().figure() || {}, w = Math.round(Math.min(1, f.wFrac || 0.5) * 100);
+      const wrap = (label, v) => [label, (f.wrap || null) === v, (pe) => pe.setFigure({ wrap: v })];
+      menu(pop, [['التفاف النص'],
+        wrap('في السطر مع النص: تُسحب إلى أي مكان في الجملة', 'inline'),
+        wrap('مربّع: النص حول الصورة', 'square'),
+        wrap('ضيّق: النص قريب من الصورة', 'tight'),
+        wrap('عبر: النص يملأ ما حول الصورة', 'through'),
+        wrap('أعلى وأسفل: الصورة وحدها في سطرها', null),
+        wrap('خلف النص: تُسحب إلى أي مكان', 'behind'),
+        wrap('أمام النص: تُسحب إلى أي مكان', 'front'),
+        ['العرض من الصفحة'],
+        ['chips', [25, 33, 50, 75, 100].map((p) => [p + '%', w === p, (pe) => pe.setFigure({ wFrac: p / 100 })])],
+        ['الإطار'],
+        ['chips', [[null, 'بلا إطار'], ['single', 'خط مفرد'], ['thick', 'خط سميك'], ['double', 'خط مزدوج'], ['dashed', 'خط متقطع'], ['dotted', 'خط منقّط']]
+          .map(([v, label]) => [label, (f.border || null) === v, (pe) => pe.setFigure({ border: v })])]]);
+    });
     button(ft, { icon: 'trash', text: 'حذف الصورة', label: 'حذف الصورة', run: (pe) => pe.chain().deleteSelection().run(), show: onFig });
 
     // above the selection, the table (or the top of the visible part of a tall one) or the picture; below when there is no room
@@ -694,7 +1023,7 @@
         const at = m === 'figure' ? view.nodeDOM(s.from) : view.domAtPos(s.from).node;
         const node = at && (m === 'table' ? (at.nodeType === 3 ? at.parentElement : at).closest('table') : at);
         if (!node) { float.hidden = true; return; }
-        r = node.getBoundingClientRect();
+        r = ((m === 'figure' && node.querySelector && node.querySelector('img')) || node).getBoundingClientRect();  // a free picture's box has no height
       }
       const host = floatHost.getBoundingClientRect(), w = float.offsetWidth, h = float.offsetHeight;
       let top = r.top - h - 6;
@@ -713,6 +1042,7 @@
         it.node.disabled = it.always ? !!(it.enabled && !it.enabled(pe)) : !pe || (it.enabled ? !it.enabled(pe) : false);
         if (it.on) { const on = !!(pe && it.on(pe)); it.node.setAttribute('aria-pressed', String(on)); it.node.classList.toggle('on', on); }
         if (it.value && pe) it.node.value = it.value(pe);
+        if (it.iconOf && pe) it.node.querySelector('use').setAttribute('href', 'vendor/icons.svg#' + it.iconOf(pe));
       }
       syncDrops();
       const m = mode(pe);

@@ -16,7 +16,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     // floating tools stand over the paragraph above it, where this click aims
     await page.evaluate(() => document.activeElement && document.activeElement.blur());
     await page.locator('#editor .ProseMirror > p').first().click();
-    await page.click('#fmtBar button[aria-label^="إدراج جزء"]'); await page.waitForSelector('#ieCropBox:not(.hidden)');
+    await page.click('#fmtBar button[aria-label="إدراج صورة"]'); await page.click('.tb-pop .menu-row:has-text("جزء من صورة الصفحة")'); await page.waitForSelector('#ieCropBox:not(.hidden)');
     const n = await pics(); await page.click('#ieSave');
     await page.waitForFunction((n) => document.querySelectorAll('#editor figure.fig').length > n, n);
   };

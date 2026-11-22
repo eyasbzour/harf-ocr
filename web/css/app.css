@@ -438,14 +438,14 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
   border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow-2); animation: pop-in .12s var(--ease);
 }
 .tb-float[hidden] { display: none; }
-.tb-size { width: 4.75rem; min-height: 2rem; padding-block: .1rem; font-size: var(--fs-sm); text-align: center; }
+.tb-size { width: 5.25rem; min-height: 2rem; padding-block: .1rem; font-size: var(--fs-sm); }
 .field-row { display: flex; gap: .6rem; align-items: end; }
 .field-row .field:not(.grow) { width: 6.5rem; flex-shrink: 0; }
 .field-row .grow { flex: 1; min-width: 0; }
 .tpl-file { justify-content: flex-start; }
 /* colour palette and table size picker under a toolbar button */
 .tb-pop {
-  position: fixed; z-index: 40; display: grid; gap: .55rem; padding: .7rem; background: var(--surface); color: var(--ink);
+  position: fixed; z-index: 40; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: .55rem; padding: .7rem; background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow-2); animation: pop-in .12s var(--ease);
 }
 .pal-none { font: inherit; font-size: var(--fs-sm); padding: .35rem .6rem; text-align: start; background: none; border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; color: var(--ink); }
@@ -462,17 +462,57 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 .grid-custom label { display: grid; gap: .15rem; }
 .grid-custom input { width: 3.6rem; min-height: 2rem; padding-block: .1rem; }
 .tb-float .tb-group { border: 0; padding: 0; gap: 2px; }
+/* a menu of choices under a toolbar button (line spacing, a picture's wrap, inserting a picture) */
+.tb-menu { display: grid; gap: 1px; min-width: 13rem; }
+.tb-menu h5, .tb-pop > h5 { margin: .35rem .3rem .15rem; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+.tb-menu h5:first-child, .tb-pop > h5:first-child { margin-top: 0; }
+.menu-row { display: flex; align-items: center; gap: .45rem; padding: .4rem .5rem; font: inherit; font-size: var(--fs-sm); text-align: start;
+  color: var(--ink); background: none; border: 0; border-radius: var(--r-ctl); cursor: pointer; }
+.menu-row:hover, .menu-row:focus-visible { background: var(--fill-hover); outline: none; }
+.menu-row .i { width: .95rem; height: .95rem; flex: none; visibility: hidden; color: var(--accent); }
+.menu-row.on .i { visibility: visible; }
+.menu-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); gap: .3rem; padding: .1rem .3rem .3rem; }
+.menu-chip { font: inherit; font-size: var(--fs-xs); padding: .35rem .3rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap; }
+.menu-chip:hover, .menu-chip:focus-visible { border-color: var(--accent); outline: none; }
+.menu-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* the bullet and numbering libraries: each tile three lines of its list */
+.ls-grid { display: grid; grid-template-columns: repeat(4, 3.6rem); gap: .35rem; }
+.ls-tile { display: grid; gap: .3rem; align-content: center; height: 3.6rem; padding: .35rem .4rem; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; color: var(--ink); }
+.ls-tile:hover, .ls-tile:focus-visible { border-color: var(--accent); outline: none; }
+.ls-tile.on { border-color: var(--accent); background: var(--accent-soft); }
+.ls-row { display: flex; align-items: center; gap: .25rem; }
+.ls-mk { flex: none; min-width: 1.05rem; font-size: .68rem; line-height: 1; text-align: start; }
+.ls-bar { flex: 1; height: 2px; border-radius: 1px; background: var(--line-strong); }
 .sheet { max-width: 46rem; margin: 0 auto; min-height: 100%; background: var(--sheet); border-radius: 3px; box-shadow: var(--shadow-page); padding: 2.5rem 2.75rem 3rem; }
 .empty-hint { color: var(--muted); text-align: center; padding: 3rem 1rem; max-width: 30rem; margin: 0 auto; line-height: 2; }
 
 /* the document: one editable area, like a page in Word */
-.doc { outline: none; min-height: 12rem; font-size: var(--fs-md); line-height: 2; color: var(--ink); }
+.doc { display: flow-root; isolation: isolate; outline: none; min-height: 12rem; font-size: var(--fs-md); line-height: 2; color: var(--ink); }
 .doc p { margin: 0 0 .3rem; text-align: justify; }
 .doc h2 { margin: .6rem 0 .35rem; font-size: calc(var(--fs-md) * 1.12); font-weight: 700; line-height: 1.8; text-align: start; }
-.doc ul, .doc ol { margin: 0 0 .35rem; padding-inline-start: 1.75rem; }
+/* the indent is each item's own, on the side it starts from: an English item on an Arabic page has its marker on the left */
+.doc ul, .doc ol { margin: 0 0 .35rem; padding: 0; }
+.doc li { margin-inline-start: 1.75rem; }
 .doc li > p { margin: 0; text-align: start; }
 .doc ul ul { list-style-type: circle; }
 .doc ol ol { list-style-type: arabic-indic; }
+/* the list styles (editor.js BULLETS / NUMBERS; docx-export.js has them for Word) */
+@counter-style harf-alpha { system: alphabetic; suffix: ". ";
+  symbols: "أ" "ب" "ت" "ث" "ج" "ح" "خ" "د" "ذ" "ر" "ز" "س" "ش" "ص" "ض" "ط" "ظ" "ع" "غ" "ف" "ق" "ك" "ل" "م" "ن" "هـ" "و" "ي"; }
+@counter-style harf-paren { system: extends decimal; suffix: ") "; }
+.doc ul[data-ls="circle"] { list-style-type: circle; }
+.doc ul[data-ls="square"] { list-style-type: square; }
+.doc ul[data-ls="diamond"] { list-style-type: "◆  "; }
+.doc ul[data-ls="arrow"] { list-style-type: "➢  "; }
+.doc ul[data-ls="check"] { list-style-type: "✓  "; }
+.doc ol[data-ls="hindi"] { list-style-type: arabic-indic; }
+.doc ol[data-ls="alpha-ar"] { list-style-type: harf-alpha; }
+.doc ol[data-ls="paren"] { list-style-type: harf-paren; }
+.doc ol[data-ls="lower"] { list-style-type: lower-latin; }
+.doc ol[data-ls="upper"] { list-style-type: upper-latin; }
+.doc ol[data-ls="roman"] { list-style-type: lower-roman; }
 .doc table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: .35rem 0 .7rem; }
 .doc td, .doc th { border: 1px solid var(--line-strong); vertical-align: top; padding: .1rem .45rem; font-size: var(--fs-base); }
 .doc td p, .doc th p { margin: 0; text-align: start; }
@@ -485,6 +525,29 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 .doc figure.fig { margin: .35rem 0; text-align: center; }
 .doc figure.fig[data-align="start"] { text-align: start; }
 .doc figure.fig[data-align="end"] { text-align: end; }
+/* "Square": on its side of the page (start is the right), the text beside it */
+.doc figure.fig[data-wrap="square"] { float: right; margin: .25rem 0 .4rem 1rem; }
+.doc figure.fig[data-wrap="square"][data-align="end"] { float: left; margin: .25rem 1rem .4rem 0; }
+/* behind or in front of the text: placed freely (editor.js sets left and margin-top), taking no room in the text */
+.doc figure.fig:is([data-wrap="behind"], [data-wrap="front"]) { position: relative; height: 0; margin: 0; }
+.doc figure.fig:is([data-wrap="behind"], [data-wrap="front"]) .fig-box { position: absolute; top: 0; max-width: none; }
+.doc figure.fig:is([data-wrap="behind"], [data-wrap="front"]) img { cursor: move; touch-action: none; }
+.doc figure.fig[data-wrap="behind"] .fig-box { z-index: -1; }
+.doc figure.fig[data-wrap="front"] .fig-box { z-index: 2; }
+/* the picture in its box (editor.js pictureView), with the resize handles on its lower corners while it is selected */
+.doc .fig-box { position: relative; display: inline-block; max-width: 100%; vertical-align: top; line-height: 0; }
+.doc .fig-box img { width: 100%; }
+.doc .fig-handle { position: absolute; bottom: -6px; width: 12px; height: 12px; display: none; background: var(--accent);
+  border: 2px solid var(--surface); border-radius: 50%; touch-action: none; z-index: 3; }
+.doc .fig-handle[data-side="left"] { left: -6px; cursor: nesw-resize; }
+.doc .fig-handle[data-side="right"] { right: -6px; cursor: nwse-resize; }
+.doc .ProseMirror-selectednode .fig-handle { display: block; }
+/* in a line of text: it moves with the words around it */
+.doc span.fig-inline { display: inline-block; max-width: 100%; vertical-align: baseline; }
+.doc span.fig-inline .fig-box { width: 100%; }
+.doc span.fig-inline img { cursor: pointer; }
+.doc span.fig-inline.ProseMirror-selectednode img { outline: 3px solid var(--accent); outline-offset: 2px; }
+.doc :is(figure.fig, span.fig-inline).framed img { border-radius: 0; }
 .doc figure.fig img { max-width: 100%; height: auto; vertical-align: top; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; }
 .doc figure.ProseMirror-selectednode img { outline: 3px solid var(--accent); outline-offset: 2px; }
 mark.flag { background: var(--flag); color: inherit; box-shadow: inset 0 -2px 0 var(--flag-strong); border-radius: 2px; cursor: pointer; padding: 0 1px; }
