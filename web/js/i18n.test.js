@@ -222,3 +222,16 @@ test('tx(): values, plurals, falling back to the Arabic, and an unknown language
   assert.strictEqual(load('zz').I18N.lang(), 'ar');  // no such file: Arabic
   assert.strictEqual(load().tx('مرحباً {name}', { name: 'x' }), 'مرحباً x');  // Arabic unless chosen
 });
+
+test('en: spot checks that the English is the right sentence (numbers and names carry over)', () => {
+  // a digit, a Latin name or a file type in the Arabic must be in its English too: catches lines put against the
+  // wrong key, which the {values} check alone does not
+  const D = I18N.dict('en');
+  const marks = (s) => (String(s).match(/[0-9]+|[A-Za-z][A-Za-z.]*[A-Za-z]/g) || []).filter((w) => !/^(n|x)$/.test(w));
+  const bad = Object.entries(D).filter(([k, v]) => {
+    const want = marks(k.replace(/\{\w+\}/g, ''));
+    const got = forms(v).join(' ');
+    return want.some((w) => !got.includes(w));
+  }).map(([k]) => k);
+  assert.deepStrictEqual(bad, []);
+});
