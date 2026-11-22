@@ -137,8 +137,10 @@ def setup() -> None:
     data, templates = LOCAL / "data", LOCAL / "templates"
     data.mkdir(parents=True, exist_ok=True)
     templates.mkdir(parents=True, exist_ok=True)
-    for f in (APP / "templates").glob("*"):  # the bundled plain template, once; the user's own are kept
-        if not (templates / f.name).exists():
+    # the bundled plain template: its .docx once (the user's own templates are kept), its details (.json: the name in
+    # the language files) every start, so an update brings them
+    for f in (APP / "templates").glob("*"):
+        if f.suffix == ".json" or not (templates / f.name).exists():
             shutil.copy2(f, templates / f.name)
     tess = ROOT / "tesseract"
     os.environ.update({

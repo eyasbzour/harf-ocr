@@ -63,7 +63,7 @@ async function seed(api) {
       await ctx.addInitScript((l) => { try { localStorage.setItem('ds.lang', l); } catch (e) { /* */ } }, lang);
       const page = await ctx.newPage();
       const errors = []; page.on('pageerror', (e) => errors.push(e.message));
-      const dir = lang === 'en' ? 'ltr' : 'rtl';
+      const dir = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'i18n', `${lang}.json`), 'utf8'))._meta.dir;
       const look = async (screen) => {
         const s = await page.evaluate(scan);
         check(`${tag} ${screen}: lang and dir`, s.lang === lang && s.dir === dir, `${s.lang} ${s.dir}`);
@@ -83,7 +83,18 @@ async function seed(api) {
       const langs = await page.$$eval('#setLang button', (bs) => bs.map((b) => [b.lang, b.getAttribute('aria-pressed')]));
       check(`${tag} settings: a button per language, the current one pressed`,
         langs.length >= 2 && langs.every(([l, p]) => (p === 'true') === (l === lang)), JSON.stringify(langs));
-      await open('dlgTpl', () => document.getElementById('btnTplNew').click()); await look('template'); await close('dlgTpl'); await close('dlgSettings');
+      await open('dlgTpl', () => document.getElementById('btnTplNew').click()); await look('template');
+      if (vw === 1440) {
+        // adding a template loads the list again: the built-in one's name is put in the language there too
+        await page.fill('#tplName', `Check ${lang}`);
+        await page.setInputFiles('#tplFile', path.join(__dirname, '..', 'blank.docx'));
+        await page.click('#btnTplAdd'); await page.waitForTimeout(800);
+        const names = await page.$$eval('#templateSel option, #tplList li', (ns) => ns.map((n) => n.textContent.trim()));
+        check(`${tag} templates after adding one: named in the language`,
+          names.length > 1 && !names.some((n) => n.includes('[object') || /\btemplate\./.test(n))
+          && (lang !== 'en' || names.some((n) => n.startsWith('No header'))), JSON.stringify(names));
+      }
+      await close('dlgTpl'); await close('dlgSettings');
       await open('dlgPhone', () => { document.getElementById('dlgPhone').showModal(); }); await look('phone'); await close('dlgPhone');
 
       await page.goto(`${BASE}/#/d/${id}`); await page.waitForSelector('#editor .ProseMirror p'); await page.waitForTimeout(600);

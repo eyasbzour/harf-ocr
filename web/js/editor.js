@@ -956,7 +956,7 @@
       enabled: (pe) => can(pe, (c) => c.sinkListItem('listItem')) });
 
     const align = group();
-    [...physical([['left', 'text-align-left', tx('editor.alignRight')], ['center', 'text-align-center', tx('editor.center')], ['right', 'text-align-right', tx('editor.alignLeft')]]),
+    [...physical([['left', 'text-align-left', tx('editor.alignLeft')], ['center', 'text-align-center', tx('editor.center')], ['right', 'text-align-right', tx('editor.alignRight')]]),
       ['justify', 'text-align-justify', tx('editor.justify')]].forEach(([a, ic, label]) => {
       button(align, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), enabled: (pe) => a !== 'justify' || !pe.editor.isActive('figure') });
     });
@@ -1148,7 +1148,7 @@
     button(ft, { icon: 'trash', label: tx('editor.deleteTable'), run: (pe) => pe.chain().deleteTable().run(), show: inTable });
 
     const onFig = when('figure');
-    physical([['left', 'text-align-left', tx('editor.pictureRight')], ['center', 'text-align-center', tx('editor.pictureCenter')], ['right', 'text-align-right', tx('editor.pictureLeft')]]).forEach(([a, ic, label]) => {
+    physical([['left', 'text-align-left', tx('editor.pictureLeft')], ['center', 'text-align-center', tx('editor.pictureCenter')], ['right', 'text-align-right', tx('editor.pictureRight')]]).forEach(([a, ic, label]) => {
       button(ft, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), show: onFig });
     });
     button(ft, { icon: 'crop', text: tx('editor.crop'), label: tx('editor.cropPicture'), run: (pe) => { pe.cropPicture(); update(); }, on: (pe) => pe.cropping(), show: onFig });

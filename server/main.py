@@ -296,6 +296,7 @@ async def ocr_spots(
     model: str = Form(""),
     api_key: str = Form(""),
     langs: str = Form("ara+eng"),
+    doc_lang: str = Form(""),  # the page's language: the notes in what is read come in it, whatever the cut-out looks like
 ):
     """A second opinion: read only some spots of a page (flagged words, a paragraph) with another engine."""
     try:
@@ -310,7 +311,8 @@ async def ocr_spots(
             results = await run_in_threadpool(
                 engines.read_spots, engine, data, spots, rotation=rotation,
                 cleanup=cleanup if cleanup in ("none", "clean", "bw") else "clean", api_key=api_key or None,
-                model=model or None, low_conf=LOW_CONF, langs=langs if langs in ("ara", "ara+eng") else "ara+eng")
+                model=model or None, low_conf=LOW_CONF, langs=langs if langs in ("ara", "ara+eng") else "ara+eng",
+                doc_lang=doc_lang if doc_lang in languages() else None)
         except engines.EngineError as e:
             return refuse(e, 422)
         except Exception as e:  # never echo the key or the request body
@@ -407,7 +409,7 @@ async def upload_image(draft_id: str, file: UploadFile = File(...)):
         _err(404, msg("server.draftNotFound"))
     raw = await file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD:
-        _err(413, msg("server.photoTooLargeLimitMb"))
+        _err(413, msg("server.photoTooLargeLimitMb", limit=MAX_UPLOAD // 1024 ** 2))
     try:
         img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
         if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
@@ -529,7 +531,11 @@ async def set_lang(request: Request):
     the window title, the web engine's own words). desktop/app.py language() reads the file it names."""
     if not DESKTOP:
         return refuse(msg("server.onlyAvailableWindowsProgram"), 404)
-    lang = (await request.json()).get("lang")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    lang = body.get("lang") if isinstance(body, dict) else None
     if lang not in languages():
         _err(400, msg("server.unknownLanguage"))
     Path(os.environ["DOCSCAN_LANG_FILE"]).write_text(lang, encoding="utf-8")

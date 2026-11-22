@@ -17,11 +17,21 @@ LATIN = re.compile(r"[A-Za-z]")
 ARABIC = re.compile(r"[؀-ۿ]")
 
 
-def is_ltr(lines: list[Line]) -> bool:
+def is_ltr_text(text: str) -> bool:
     """Mostly Latin letters: an English page."""
-    text = " ".join(w.text for ln in lines for w in ln.words)
     latin, arabic = len(LATIN.findall(text)), len(ARABIC.findall(text))
     return latin >= 20 and latin > 1.5 * arabic
+
+
+def is_ltr(lines: list[Line]) -> bool:
+    return is_ltr_text(" ".join(w.text for ln in lines for w in ln.words))
+
+
+def blocks_text(blocks: list[dict]) -> str:
+    """The text of a page's blocks, table cells included."""
+    segs = [sg for b in blocks for part in ([c for row in b.get("rows") or [] for c in row] or [b.get("segs") or []])
+            for sg in part]
+    return " ".join(str(sg.get("s", "")) for sg in segs) + " ".join(str(b.get("text", "")) for b in blocks)
 
 
 def in_reading_order(lines: list[Line]) -> list[Line]:

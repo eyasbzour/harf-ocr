@@ -94,6 +94,10 @@
 
   // ------------------------------------------------------------------ state
   let ENGINES = [], CLAUDE_MODELS = [], TEMPLATES = [], TPL_ADMIN = false, FORMATS = [];
+  // the server names readers, and the built-in template, as messages ({ key, args }: messages.py wire): put in the
+  // interface's language here, on every load of the lists; a reader's own name and a typed template name stay as they are
+  const useEngines = (eng) => { ENGINES = eng.engines.map((e) => ({ ...e, label: I18N.message(e.label), reason: I18N.message(e.reason) })); };
+  const useTemplates = (tpl) => { TEMPLATES = tpl.templates.map((t) => ({ ...t, name: I18N.message(t.name) })); TPL_ADMIN = tpl.adminRequired; };
   let draft = null;          // the open draft
   let current = 0;           // index of the page being shown
   let dirty = false, saving = false, saveTimer = null;
@@ -182,10 +186,8 @@
       const [eng, tpl, fmt] = await Promise.all([api('/api/engines'), api('/api/templates'), api('/api/formats')]);
       // the server names its readers and formats in Arabic (messages.py msg): shown in the interface's language
       FORMATS = fmt.formats.map((f) => ({ ...f, label: I18N.message(f.label) }));
-      ENGINES = eng.engines.map((e) => ({ ...e, label: I18N.message(e.label), reason: I18N.message(e.reason) }));
+      useEngines(eng); useTemplates(tpl);
       CLAUDE_MODELS = eng.claudeModels;
-      TEMPLATES = tpl.templates.map((t) => ({ ...t, name: I18N.message(t.name) }));  // the built-in one's is a message (templates/plain.json); users' stay as typed
-      TPL_ADMIN = tpl.adminRequired;
     } catch (e) { toast(tx('app.couldntReachServer', { error: e.message }), true); }
     fillEngineSelect(); fillTemplateSelect(); fillFormats();
     $('newOwner').value = settings.author;
@@ -791,13 +793,13 @@
     if (st.state === 'error') { $('partsText').textContent = I18N.message(st.error); showPartsBox(); return; }
     if (st.state === 'restart') {
       $('partsText').textContent = tx('app.downloadCompleteRestartProgramNuqta');
-      try { ENGINES = (await api('/api/engines')).engines; fillEngineSelect(); } catch (e) { /* the list stays */ }
+      try { useEngines(await api('/api/engines')); fillEngineSelect(); } catch (e) { /* the list stays */ }
       showPartsBox();
       return;
     }
     if (st.state === 'done') {
       bar.classList.add('hidden');
-      try { ENGINES = (await api('/api/engines')).engines; } catch (e) { return; }
+      try { useEngines(await api('/api/engines')); } catch (e) { return; }
       fillEngineSelect();
       if (partsWanted && ENGINES.some((e) => e.id === partsWanted && e.available)) {
         $('engineSel').value = partsWanted; store.set('engine', partsWanted, true); engineChanged();
@@ -960,6 +962,9 @@
     fd.append('draft_id', draft.id); fd.append('image', p.readImage); fd.append('engine', engine);
     fd.append('boxes', JSON.stringify(boxes)); fd.append('rotation', String(p.readRot || 0));
     fd.append('cleanup', $('cleanupSel').value); fd.append('langs', $('langsSel').value); fd.append('model', $('modelSel').value);
+    // the notes in what comes back are in the page's language: English when most of its paragraphs run left to right
+    const blocks = p.blocks || [];
+    fd.append('doc_lang', blocks.filter((b) => b.dir === 'ltr').length * 2 > blocks.length ? 'en' : 'ar');
     if (key) fd.append('api_key', key);
     return (await api('/api/ocr-spots', { method: 'POST', body: fd })).results;
   }
@@ -1576,7 +1581,7 @@
       : el('button', { type: 'button', class: 'btn ghost small danger', onclick: () => deleteTemplate(t) }, tx('app.delete')))));
   }
   async function reloadTemplates() {
-    const tpl = await api('/api/templates'); TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired; fillTemplateSelect();
+    useTemplates(await api('/api/templates')); fillTemplateSelect();
   }
   // the add-template window; from the draft's template list the new template is chosen for the draft
   let tplForDraft = false;

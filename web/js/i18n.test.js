@@ -237,3 +237,14 @@ test('tx(): values, falling back to Arabic and then the name; message(); an unkn
   assert.strictEqual(ctx.I18N.message('Google Vision'), 'Google Vision');  // plain text stays as it is
   assert.strictEqual(load('zz').I18N.lang(), 'ar');  // no such file: Arabic
 });
+
+test('a name that says a side says the same side as its Arabic', () => {
+  // alignRight / pictureLeft / rotate90Left...: right is يمين and left is يسار, so the English made from the name agrees
+  // right is يمين or أيمن, left يسار or أيسر. A side at the end of the name (alignRight, rotate90LeftLabel) or at its start (rightBorder); not "right to left"
+  const side = (k) => (k.match(/(Right|Left)(?:Label)?$/) || k.match(/\.(right|left)(?!Left|Right)[A-Z]/) || [])[1];
+  const bad = Object.entries(SOURCE).filter(([k, v]) => {
+    const s = side(k);
+    return s && !JSON.stringify(v).includes(s.toLowerCase() === 'right' ? 'يم' : 'يس');
+  }).map(([k]) => k);
+  assert.deepStrictEqual(bad, []);
+});

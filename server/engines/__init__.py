@@ -54,10 +54,13 @@ def availability(engine_id: str) -> tuple[bool, str]:
 
 def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str = "clean",
         api_key: str | None = None, model: str | None = None, skip_letterhead: bool = True,
-        low_conf: float = 65, langs: str = "ara+eng", spot: bool = False, direction: str = "auto") -> list[dict]:
+        low_conf: float = 65, langs: str = "ara+eng", spot: bool = False, direction: str = "auto",
+        doc_lang: str | None = None) -> list[dict]:
     """Read a page into blocks. spot=True: the image is a small cut-out (read_spots), read as plain text
     without the page-level steps (handwriting, lists, the number check). direction: "auto" (from the text),
-    "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py)."""
+    "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py).
+    doc_lang: the language of the text the readers write into the document (notes, "[Signature]"); by default the
+    page's: English on a left-to-right page, Arabic otherwise (messages.py in_language)."""
     if engine_id not in {e["id"] for e in ENGINES}:
         raise EngineError(msg("server.unknownReader"))
     ok, why = availability(engine_id)
@@ -67,10 +70,11 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
     # own and do worse on it: PaddleOCR drops the digits of "الرقم: 245 / 2026" on the cleaned image.
     mode = cleanup if engine_id.startswith("tess-") else "none"
     img = load_image(image_bytes, rotation, mode)
-    if engine_id == "claude":
-        return ai_engines.run_claude(img, api_key, model, skip_letterhead and not spot)
-    if engine_id == "google":
-        return ai_engines.run_google(img, api_key, low_conf)
+    if engine_id in ("claude", "google"):
+        blocks = (ai_engines.run_claude(img, api_key, model, skip_letterhead and not spot) if engine_id == "claude"
+                  else ai_engines.run_google(img, api_key, low_conf))
+        ltr = direction == "ltr" or (direction == "auto" and ltr_page.is_ltr_text(ltr_page.blocks_text(blocks)))
+        return in_language(blocks, doc_lang or ("en" if ltr else "ar"))
     # free engines: lines with word positions -> one shared layout step (tables, side-by-side parts, paragraphs)
     grids, unruled = find_tables(img)
     if engine_id.startswith("tess-"):
@@ -94,7 +98,8 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
         grids = ltr_page.mirror_grids(grids, W)
         colour = ltr_page.mirror_image(img if mode == "none" else load_image(image_bytes, rotation, "none"))
         img = ltr_page.mirror_image(img)
-    done = (lambda blocks: in_language(ltr_page.unmirror_blocks(blocks), "en")) if ltr else (lambda blocks: blocks)  # noqa: E731
+    lang = doc_lang or ("en" if ltr else "ar")
+    done = lambda blocks: in_language(ltr_page.unmirror_blocks(blocks) if ltr else blocks, lang)  # noqa: E731
     if spot:
         return done(lines_to_blocks(lines, low_conf, grids, img.size))
     # handwriting, signatures and stamps leave the text and come back as notes (colour needs the photo itself)

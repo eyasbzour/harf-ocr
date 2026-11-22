@@ -166,3 +166,51 @@ def test_render_plurals_and_fallback():
     assert render("ar", "app.pageCount", n=2) == "صفحتان"
     assert render("en", "app.pageCount", n=0) == "No pages"
     assert render("xx", "ui.save") == SOURCE["ui.save"]  # no such language: the Arabic
+
+
+# ---- the review's fixes
+def test_claude_and_google_notes_follow_the_page(monkeypatch):
+    import io
+
+    from PIL import Image
+
+    import engines
+    from engines import ai_engines
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, "PNG")
+    def english(*a, **k):  # a new page each time: in_language changes the blocks it is given
+        return [{"type": "p", "segs": [{"s": "The quarterly report of the archive department is attached "},
+                                       {"s": "here", "note": low_note(40)}]}]
+    monkeypatch.setattr(ai_engines, "run_google", english)
+    out = engines.run("google", buf.getvalue(), api_key="k")
+    assert out[0]["segs"][1]["note"] == "Uncertain reading (confidence 40%). Compare it with the original photo."
+    # a spot read again keeps the page's language, whatever the cut-out looks like
+    out = engines.run("google", buf.getvalue(), api_key="k", doc_lang="ar")
+    assert isinstance(out[0]["segs"][1]["note"], Msg)
+
+
+def test_lang_refuses_a_body_that_is_not_an_object(client, monkeypatch, tmp_path):
+    import main
+
+    monkeypatch.setattr(main, "DESKTOP", True)
+    monkeypatch.setenv("DOCSCAN_LANG_FILE", str(tmp_path / "lang"))
+    for body in (["en"], "en", None):
+        r = client.post("/api/lang", json=body)
+        assert r.status_code == 400 and r.json()["key"] == "server.unknownLanguage", body
+    assert client.post("/api/lang", content=b"not json", headers={"content-type": "application/json"}).status_code == 400
+    assert client.post("/api/lang", json={"lang": "en"}).status_code == 200
+    assert (tmp_path / "lang").read_text(encoding="utf-8") == "en"
+
+
+def test_limits_in_messages_come_from_their_values():
+    import main
+    import parts
+
+    assert str(main.MAX_UPLOAD // 1024 ** 2) in msg("server.photoTooLargeLimitMb", limit=main.MAX_UPLOAD // 1024 ** 2)
+    assert render("en", "server.notEnoughDiskSpaceAbout", need=parts.NEED // 1024 ** 3).startswith("Not enough disk space: about 7 GB")
+
+
+def test_plurals_by_language():
+    assert render("en", "app.pageCount", n=15) == "15 pages"  # English has no "many"
+    assert render("ar", "app.pageCount", n=15) == "15 صفحة"

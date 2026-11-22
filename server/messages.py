@@ -29,14 +29,17 @@ def language_file(code: str) -> tuple[dict, dict]:
     return data.pop("_meta"), data
 
 
-def _plural(n) -> str:
-    """Enough of Intl.PluralRules for the forms the files use; "other" when a form is missing."""
+def _plural(lang: str, n) -> str:
+    """Intl.PluralRules' form for Arabic (zero, one, two, few, many, other), and one/other for the other languages,
+    as English. A language with other rules (French: 0 is "one") needs its own line here, as the browser has."""
     try:
         n = int(n)
     except (TypeError, ValueError):
         return "other"
-    return "zero" if n == 0 else "one" if n == 1 else "two" if n == 2 else "few" if 3 <= n % 100 <= 10 else \
-        "many" if 11 <= n % 100 <= 99 else "other"
+    if lang == "ar":
+        return "zero" if n == 0 else "one" if n == 1 else "two" if n == 2 else "few" if 3 <= n % 100 <= 10 else \
+            "many" if 11 <= n % 100 <= 99 else "other"
+    return "one" if n == 1 else "other"
 
 
 class _Format(string.Formatter):
@@ -51,7 +54,8 @@ def render(lang: str, key: str, **args) -> str:
     entries = language_file(lang)[1] if lang in languages() else {}
     v = entries.get(key, language_file(SOURCE)[1][key])
     if isinstance(v, dict):
-        v = v.get(_plural(args.get("n"))) or v["other"]
+        n = args.get("n")
+        v = (n == 0 and v.get("zero")) or v.get(_plural(lang if lang in languages() else SOURCE, n)) or v["other"]
     if not args:
         return v
     return _Format().format(v, **{k: render(lang, x.key, **x.args) if isinstance(x, Msg) else str(_of(x))

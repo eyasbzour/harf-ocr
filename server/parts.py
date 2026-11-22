@@ -46,7 +46,7 @@ def start() -> None:
         if _state["state"] in ("downloading", "unpacking"):
             return
         if shutil.disk_usage(ROOT).free < NEED:
-            raise RuntimeError(msg("server.notEnoughDiskSpaceAbout"))
+            raise RuntimeError(msg("server.notEnoughDiskSpaceAbout", need=NEED // 1024 ** 3))
         _state.update(state="downloading", done=0, total=0, error="")
         _stop.clear()
     threading.Thread(target=_run, daemon=True, name="parts").start()
