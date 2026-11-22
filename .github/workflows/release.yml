@@ -1,8 +1,7 @@
 # Builds the Windows installer and publishes it as a GitHub Release.
 # Runs on a version tag (git tag v1.0.1 && git push --tags) or by hand (Actions > Windows installer > Run).
 # Release assets: HarfOCR-Setup-<version>.exe (the program with Tesseract and PaddleOCR) and the optional
-# readers the installer downloads when chosen (HarfOCR-part-heavy.zip, HarfOCR-part-models.zip). The installer is also
-# attached as DocScan-Setup-<version>.exe: 1.0.2 and before (the DocScan name) look for that name to update.
+# readers the installer downloads when chosen (HarfOCR-part-heavy.zip, HarfOCR-part-models.zip).
 # The installed program checks this repository's latest release at start and offers the update.
 name: Windows installer
 
@@ -61,8 +60,6 @@ jobs:
           Invoke-WebRequest "https://raw.githubusercontent.com/jrsoftware/issrc/625730370968d1b82a6925f3ac3d671b5aeafb57/Files/Languages/Arabic.isl" -OutFile desktop/Arabic.isl
           & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" "/DHeavyVersion=${{ steps.v.outputs.heavy }}" desktop/installer.iss
           if ($LASTEXITCODE) { throw "installer" }
-          # the same installer under the old name, for 1.0.2 and before to find (server/updater.py there)
-          Copy-Item "build/out/HarfOCR-Setup-${{ steps.v.outputs.version }}.exe" "build/out/DocScan-Setup-${{ steps.v.outputs.version }}.exe"
           Get-ChildItem build/out | Format-Table Name, Length
 
       - name: Release
@@ -73,7 +70,6 @@ jobs:
           make_latest: true
           files: |
             build/out/HarfOCR-Setup-*.exe
-            build/out/DocScan-Setup-*.exe
             build/out/HarfOCR-part-*.zip
           # the program shows what is between the whats-new markers (server/updater.py NOTES)
           body: |

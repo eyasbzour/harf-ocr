@@ -1,7 +1,7 @@
 """Updates for the Windows program (desktop/app.py sets DOCSCAN_DESKTOP=1 and DOCSCAN_VERSION).
 
 On start, and from Settings, the program asks GitHub for the latest release. A newer one is offered in the app; installing
-downloads its installer (HarfOCR-Setup-<version>.exe; DocScan-Setup-<version>.exe before the rename) and runs it in silent mode, and the program closes so
+downloads its installer (HarfOCR-Setup-<version>.exe) and runs it in silent mode, and the program closes so
 the installer can replace it (the installer opens it again). No internet, GitHub down, no release yet:
 nothing is shown. Only the release is fetched; nothing about the user is sent (a generic User-Agent).
 What's new is the version tag's message, which .github/workflows/release.yml puts between NOTES markers.
@@ -39,7 +39,7 @@ def check(timeout: float = 5, quiet: bool = True) -> dict | None:
         latest = rel.get("tag_name", "").lstrip("v")
         if not latest or _tuple(latest) <= _tuple(current()):
             return None
-        asset = next((a for a in rel.get("assets", []) if re.match(r"(HarfOCR|DocScan)-Setup-.*\.exe$", a.get("name", ""))), None)
+        asset = next((a for a in rel.get("assets", []) if re.match(r"HarfOCR-Setup-.*\.exe$", a.get("name", ""))), None)
         if not asset:
             return None
         notes = NOTES.search(rel.get("body") or "")  # none in releases before 1.0.2
