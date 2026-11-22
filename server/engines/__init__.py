@@ -6,13 +6,13 @@ import io
 import os
 
 from . import direction as ltr_page
-from .common import EngineError, lines_to_blocks, load_image  # noqa: F401
+from .common import EngineError, in_language, lines_to_blocks, load_image, seg_lists  # noqa: F401
 from .emphasis import mark_bold
 from .lists import mark_list_items
 from .marks import split_marks
 from .numbers import check_numbers
 from .tables import find_tables
-from messages import in_language, msg
+from messages import msg
 
 # EasyOCR and PaddleOCR score their own confidence lower than Tesseract does,
 # so they get their own threshold for flagging.
@@ -55,12 +55,22 @@ def availability(engine_id: str) -> tuple[bool, str]:
 def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str = "clean",
         api_key: str | None = None, model: str | None = None, skip_letterhead: bool = True,
         low_conf: float = 65, langs: str = "ara+eng", spot: bool = False, direction: str = "auto",
-        doc_lang: str | None = None) -> list[dict]:
+        doc_lang: str | None = None) -> tuple[list[dict], str]:
     """Read a page into blocks. spot=True: the image is a small cut-out (read_spots), read as plain text
     without the page-level steps (handwriting, lists, the number check). direction: "auto" (from the text),
     "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py).
     doc_lang: the language of the text the readers write into the document (notes, "[Signature]"); by default the
-    page's: English on a left-to-right page, Arabic otherwise (messages.py in_language)."""
+    page's: English on a left-to-right page, Arabic otherwise. Returns the blocks and that language, which the page
+    keeps, so a spot read again later gets it too (read_spots)."""
+    blocks, ltr = _read(engine_id, image_bytes, rotation=rotation, cleanup=cleanup, api_key=api_key, model=model,
+                        skip_letterhead=skip_letterhead, low_conf=low_conf, langs=langs, spot=spot, direction=direction)
+    lang = doc_lang or ("en" if ltr else "ar")
+    return in_language(blocks, lang), lang
+
+
+def _read(engine_id, image_bytes, *, rotation, cleanup, api_key, model, skip_letterhead, low_conf, langs, spot,
+          direction) -> tuple[list[dict], bool]:
+    """The blocks, and whether the page runs left to right."""
     if engine_id not in {e["id"] for e in ENGINES}:
         raise EngineError(msg("server.unknownReader"))
     ok, why = availability(engine_id)
@@ -73,8 +83,7 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
     if engine_id in ("claude", "google"):
         blocks = (ai_engines.run_claude(img, api_key, model, skip_letterhead and not spot) if engine_id == "claude"
                   else ai_engines.run_google(img, api_key, low_conf))
-        ltr = direction == "ltr" or (direction == "auto" and ltr_page.is_ltr_text(ltr_page.blocks_text(blocks)))
-        return in_language(blocks, doc_lang or ("en" if ltr else "ar"))
+        return blocks, direction == "ltr" or (direction == "auto" and ltr_page.is_ltr_text(ltr_page.blocks_text(blocks)))
     # free engines: lines with word positions -> one shared layout step (tables, side-by-side parts, paragraphs)
     grids, unruled = find_tables(img)
     if engine_id.startswith("tess-"):
@@ -98,8 +107,7 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
         grids = ltr_page.mirror_grids(grids, W)
         colour = ltr_page.mirror_image(img if mode == "none" else load_image(image_bytes, rotation, "none"))
         img = ltr_page.mirror_image(img)
-    lang = doc_lang or ("en" if ltr else "ar")
-    done = lambda blocks: in_language(ltr_page.unmirror_blocks(blocks) if ltr else blocks, lang)  # noqa: E731
+    done = lambda blocks: (ltr_page.unmirror_blocks(blocks) if ltr else blocks, ltr)  # noqa: E731
     if spot:
         return done(lines_to_blocks(lines, low_conf, grids, img.size))
     # handwriting, signatures and stamps leave the text and come back as notes (colour needs the photo itself)
@@ -131,12 +139,10 @@ def read_spots(engine_id: str, image_bytes: bytes, boxes: list, *, rotation: int
         buf = io.BytesIO()
         crop.save(buf, "PNG")
         segs: list[dict] = []
-        for bl in run(engine_id, buf.getvalue(), spot=True, **kw):
-            parts = [c for row in bl.get("rows", []) for c in row] if bl["type"] == "table" else [bl.get("segs", [])]
-            for part in parts:
-                if part and segs:
-                    segs.append({"s": " "})
-                segs.extend(part)
+        for part in seg_lists(run(engine_id, buf.getvalue(), spot=True, **kw)[0]):
+            if part and segs:
+                segs.append({"s": " "})
+            segs.extend(part)
         for sg in segs:  # a flag's spot is on the cut-out: put it back on the page
             if "box" in sg:
                 bx = sg["box"]

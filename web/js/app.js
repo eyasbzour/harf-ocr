@@ -32,7 +32,7 @@
   async function api(path, opts = {}) {
     const res = await fetch(path, opts);
     let data = null;
-    try { data = await res.json(); } catch (e) { /* non-json */ }
+    try { data = JSON.parse(await res.text(), I18N.revive); } catch (e) { /* non-json */ }  // messages in the language
     if (!res.ok) {
       const err = new Error(I18N.message(data) || tx('app.errorStatus', { status: res.status }));
       err.status = res.status; err.data = data; throw err;
@@ -94,10 +94,8 @@
 
   // ------------------------------------------------------------------ state
   let ENGINES = [], CLAUDE_MODELS = [], TEMPLATES = [], TPL_ADMIN = false, FORMATS = [];
-  // the server names readers, and the built-in template, as messages ({ key, args }: messages.py wire): put in the
-  // interface's language here, on every load of the lists; a reader's own name and a typed template name stay as they are
-  const useEngines = (eng) => { ENGINES = eng.engines.map((e) => ({ ...e, label: I18N.message(e.label), reason: I18N.message(e.reason) })); };
-  const useTemplates = (tpl) => { TEMPLATES = tpl.templates.map((t) => ({ ...t, name: I18N.message(t.name) })); TPL_ADMIN = tpl.adminRequired; };
+  const useEngines = (eng) => { ENGINES = eng.engines; };
+  const useTemplates = (tpl) => { TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired; };
   let draft = null;          // the open draft
   let current = 0;           // index of the page being shown
   let dirty = false, saving = false, saveTimer = null;
@@ -184,8 +182,7 @@
     bindStatic();
     try {
       const [eng, tpl, fmt] = await Promise.all([api('/api/engines'), api('/api/templates'), api('/api/formats')]);
-      // the server names its readers and formats in Arabic (messages.py msg): shown in the interface's language
-      FORMATS = fmt.formats.map((f) => ({ ...f, label: I18N.message(f.label) }));
+      FORMATS = fmt.formats;  // its labels, the readers' and the built-in template's arrive in the language (api)
       useEngines(eng); useTemplates(tpl);
       CLAUDE_MODELS = eng.claudeModels;
     } catch (e) { toast(tx('app.couldntReachServer', { error: e.message }), true); }
@@ -852,7 +849,7 @@
       const r = await api('/api/ocr', { method: 'POST', body: fd });
       if (p.blocks) pushVersion(p, p.readWith ? { engine: p.readWith, edited: true } : { kind: 'earlier' }, p.blocks);
       pushVersion(p, { engine }, r.blocks);
-      p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0;
+      p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0; p.docLang = r.lang;
       busyPages.delete(p.id);
       if (i === current) { renderEditor(); fillVersions(); }
       markDirty(); renderPages(); updateReadState(tx('app.readInSeconds', { seconds: r.seconds }));
@@ -962,9 +959,7 @@
     fd.append('draft_id', draft.id); fd.append('image', p.readImage); fd.append('engine', engine);
     fd.append('boxes', JSON.stringify(boxes)); fd.append('rotation', String(p.readRot || 0));
     fd.append('cleanup', $('cleanupSel').value); fd.append('langs', $('langsSel').value); fd.append('model', $('modelSel').value);
-    // the notes in what comes back are in the page's language: English when most of its paragraphs run left to right
-    const blocks = p.blocks || [];
-    fd.append('doc_lang', blocks.filter((b) => b.dir === 'ltr').length * 2 > blocks.length ? 'en' : 'ar');
+    if (p.docLang) fd.append('doc_lang', p.docLang);  // the notes in what comes back in the page's language (/api/ocr)
     if (key) fd.append('api_key', key);
     return (await api('/api/ocr-spots', { method: 'POST', body: fd })).results;
   }

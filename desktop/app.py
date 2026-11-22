@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import shutil
 import socket
+import string
 import sys
 import threading
 import time
@@ -38,20 +40,20 @@ def language() -> str:
     """The interface language: the one picked in Settings (LOCAL\\lang, which the server's /api/lang writes), else the one
     the installer ran in (ROOT\\lang.ini; installer.iss writes it on a fresh install only, so an update changes nothing),
     else Arabic. The page itself keeps its own pick too (web/js/i18n.js) and gets this one as its default."""
-    known = languages()
-    for f, prefix in ((LOCAL / "lang", ""), (ROOT / "lang.ini", "lang=")):
+    def read(f: Path) -> str:
         try:
-            for line in f.read_text(encoding="utf-8-sig").splitlines():
-                v = line.strip()[len(prefix):].strip() if line.strip().startswith(prefix) else ""
-                if v in known:
-                    return v
+            return f.read_text(encoding="utf-8-sig")
         except OSError:
-            pass
+            return ""
+
+    ini = re.search(r"^\s*lang\s*=\s*(\w+)", read(ROOT / "lang.ini"), re.M)
+    for v in (read(LOCAL / "lang").strip(), ini and ini.group(1)):
+        if v in languages():
+            return v
     return SOURCE
 
 
 LANG = language()
-LANG_META = language_file(LANG)[0]
 
 
 def tr(key: str) -> str:
@@ -98,8 +100,8 @@ p{margin:0 0 18px;color:var(--muted);font-size:13px}
 <div class="doc" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><div class="beam"></div></div>
 <h1>$TITLE</h1><p>$STARTING</p>
 <div class="bar" role="progressbar" aria-label="$BUSY"><b></b></div></main></body></html>"""
-SPLASH = (SPLASH.replace("$LANG", LANG).replace("$DIR", LANG_META["dir"]).replace("$TITLE", TITLE)
-          .replace("$STARTING", tr("launcher.startingProgram")).replace("$BUSY", tr("launcher.starting")))
+SPLASH = string.Template(SPLASH).substitute(LANG=LANG, DIR=language_file(LANG)[0]["dir"], TITLE=TITLE,
+                                            STARTING=tr("launcher.startingProgram"), BUSY=tr("launcher.starting"))
 
 
 def message(text: str, error: bool = False) -> None:
@@ -137,10 +139,8 @@ def setup() -> None:
     data, templates = LOCAL / "data", LOCAL / "templates"
     data.mkdir(parents=True, exist_ok=True)
     templates.mkdir(parents=True, exist_ok=True)
-    # the bundled plain template: its .docx once (the user's own templates are kept), its details (.json: the name in
-    # the language files) every start, so an update brings them
-    for f in (APP / "templates").glob("*"):
-        if f.suffix == ".json" or not (templates / f.name).exists():
+    for f in (APP / "templates").glob("*"):  # the bundled plain template, once; the user's own are kept
+        if not (templates / f.name).exists():
             shutil.copy2(f, templates / f.name)
     tess = ROOT / "tesseract"
     os.environ.update({

@@ -631,9 +631,10 @@
   "doc.machineReadingCantReadPhoto": "The machine reading can't read this {label!l} in the photo accurately.{guess} Type its text here or delete this spot.",
   "doc.numberTesseractReadPaddleocrMissed": "A number Tesseract read that PaddleOCR missed. Check it in the photo.",
   "doc.uncertain": "Uncertain",
-  "doc.notesPlaceApproximate": "(the note's place is approximate) ",
+  "doc.notesPlaceApproximate": "(the note's place is approximate) {note}",
   "doc.note": "Note",
   "doc.unreadable": "Unreadable",
   "app.readerQuote": "{reader}: \"{text}\"",
-  "editor.tableSize": "{rows} × {cols}"
+  "editor.tableSize": "{rows} × {cols}",
+  "doc.notesJoined": "{first}\n{second}"
 }

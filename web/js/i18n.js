@@ -15,9 +15,13 @@
   function stored() {
     try { return localStorage.getItem('ds.lang'); } catch (e) { return null; }  // storage blocked
   }
-  // ds.lang when chosen; else the default the server gives (/js/lang-default.js: the Windows program's installer)
-  var wanted = stored() || root.HARF_LANG_DEFAULT || SOURCE;
-  function current() { return metas[wanted] ? wanted : SOURCE; }
+  // ds.lang when chosen; else the default the server gives (HARF_LANG_DEFAULT, first in /i18n/all.js: the Windows
+  // program's installer or Settings, or a server's DOCSCAN_LANG); read when first asked, which all.js does
+  var wanted = null;
+  function current() {
+    if (wanted === null) wanted = stored() || root.HARF_LANG_DEFAULT || SOURCE;
+    return metas[wanted] ? wanted : SOURCE;
+  }
 
   var rules = {};
   function plural(n) {
@@ -32,13 +36,9 @@
       return x && typeof x === 'object' && x.key ? t(x.key, x.args) : x;
     }) : s;
   }
-  function lookup(key) {
+  function t(key, vars) {
     var d = dicts[current()], v = d && d[key];
     if (v == null && dicts[SOURCE]) v = dicts[SOURCE][key];
-    return v;
-  }
-  function t(key, vars) {
-    var v = lookup(key);
     if (v && typeof v === 'object') v = (vars && vars.n === 0 && v.zero) || v[plural(vars && vars.n)] || v.other;
     return fill(typeof v === 'string' ? v : String(key), vars);
   }
@@ -52,6 +52,14 @@
     return typeof m === 'string' ? m : '';
   }
 
+  // JSON.parse's reviver for the server's replies: a message ({ key, args } and nothing else: messages.py to_json)
+  // becomes its text in the chosen language; its values are revived first, so nested messages too
+  function revive(k, v) {
+    if (v && typeof v === 'object' && typeof v.key === 'string' && v.args && typeof v.args === 'object'
+      && Object.keys(v).length === 2) return t(v.key, v.args);
+    return v;
+  }
+
   var ATTRS = ['title', 'aria-label', 'placeholder', 'alt', 'data-short'];
   function apply(node) {
     var els = node.querySelectorAll('[data-i18n]'), i, j;
@@ -63,9 +71,8 @@
   }
 
   var I18N = {
-    t: t, message: message, apply: apply, plural: plural,
+    t: t, message: message, apply: apply, revive: revive,
     lang: current,
-    dir: function () { return (metas[current()] || { dir: 'rtl' }).dir; },
     // { code, name, dir } for each language, the source first: names in their own language
     languages: function () {
       return Object.keys(metas).sort(function (a, b) { return (a !== SOURCE) - (b !== SOURCE) || (a < b ? -1 : 1); })
@@ -82,7 +89,6 @@
         root.document.documentElement.dir = file._meta.dir;
       }
     },
-    dict: function (code) { return dicts[code]; },
     // saves the choice; the caller reloads the page (after saving the open draft)
     set: function (code) {
       try { if (metas[code]) localStorage.setItem('ds.lang', code); else localStorage.removeItem('ds.lang'); } catch (e) { /* blocked */ }

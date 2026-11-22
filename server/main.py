@@ -28,7 +28,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import convert
 import engines
-from messages import Msg, language_file, languages, msg, payload, wire
+from messages import Msg, language_file, languages, msg, payload, to_json
 import parts
 import remote
 
@@ -52,7 +52,14 @@ ID_RE = re.compile(r"^[a-f0-9]{32}$")
 IMG_RE = re.compile(r"^[a-f0-9]{32}\.jpg$")
 TPL_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
 
-app = FastAPI(title="Harf OCR", docs_url=None, redoc_url=None)
+class Reply(JSONResponse):
+    """Every JSON reply: messages in it go out as {key, args} (messages.py to_json), in whatever field."""
+
+    def render(self, content) -> bytes:
+        return super().render(to_json(content))
+
+
+app = FastAPI(title="Harf OCR", docs_url=None, redoc_url=None, default_response_class=Reply)
 
 
 # ------------------------------------------------------------------ web files: always the current version
@@ -86,7 +93,7 @@ async def password_gate(request: Request, call_next):
 # ------------------------------------------------------------------ use on phone (remote.py)
 # what a phone may reach before signing in: the sign-in page and what it draws with
 PHONE_OPEN = ("/phone.html", "/api/remote/login", "/css/app.css", "/js/theme.js", "/vendor/icons.svg",
-              "/js/lang-default.js", "/js/i18n.js", "/i18n/all.js")
+              "/js/i18n.js", "/i18n/all.js")
 PC_ONLY = ("/api/remote", "/api/update", "/api/parts", "/api/restart", "/api/lang")  # the program's own controls
 
 
@@ -108,7 +115,7 @@ async def phone_gate(request: Request, call_next):
 
 def refuse(m, status: int, **extra) -> JSONResponse:
     """A refusal or error reply: {"error", "key", "args"} (messages.py payload), so the page shows it in its language."""
-    return JSONResponse({**payload(m), **extra}, status_code=status)
+    return Reply({**payload(m), **extra}, status_code=status)
 
 
 def _err(status: int, m: Msg):
@@ -250,7 +257,7 @@ def list_engines(request: Request):
         installable = not ok and e["id"] in ("nuqta", "easyocr") and parts.offered() and not remote.is_remote(request.scope)
         if installable and parts.status()["state"] == "restart":
             installable, why = False, msg("server.downloadCompleteRestartProgramReader")
-        out.append({**e, "label": wire(e["label"]), "available": ok, "reason": payload(why) if why else None, "serverKey": server_key, "installable": installable})
+        out.append({**e, "available": ok, "reason": why or None, "serverKey": server_key, "installable": installable})
     return {"engines": out, "claudeModels": CLAUDE_MODELS, "lowConfidence": LOW_CONF}
 
 
@@ -274,7 +281,7 @@ async def ocr(
     t0 = time.time()
     async with OCR_SLOTS:
         try:
-            blocks = await run_in_threadpool(
+            blocks, lang = await run_in_threadpool(
                 engines.run, engine, data, rotation=rotation, cleanup=cleanup,
                 api_key=api_key or None, model=model or None,
                 skip_letterhead=skip_letterhead, low_conf=LOW_CONF,
@@ -284,7 +291,8 @@ async def ocr(
             return refuse(e, 422)
         except Exception as e:  # never echo the key or the request body
             return refuse(msg("server.unexpectedErrorWhileReading", error=type(e).__name__), 500)
-    return {"blocks": blocks, "engine": engine, "seconds": round(time.time() - t0, 1)}
+    # lang: the document's language (its notes, "[Signature]"), kept with the page for reading its spots again
+    return {"blocks": blocks, "lang": lang, "engine": engine, "seconds": round(time.time() - t0, 1)}
 
 
 @app.post("/api/ocr-spots")
@@ -298,7 +306,7 @@ async def ocr_spots(
     model: str = Form(""),
     api_key: str = Form(""),
     langs: str = Form("ara+eng"),
-    doc_lang: str = Form(""),  # the page's language: the notes in what is read come in it, whatever the cut-out looks like
+    doc_lang: str = Form(""),  # the page's language (/api/ocr "lang"): notes in what is read come in it
 ):
     """A second opinion: read only some spots of a page (flagged words, a paragraph) with another engine."""
     try:
@@ -467,8 +475,8 @@ def list_templates():
                 info = json.loads(meta.read_text(encoding="utf8"))
             except Exception:
                 info = {}
-        # a built-in one names its label in the language files (templates/plain.json); a user's keeps what was typed
-        name = wire(msg(info["label"])) if info.get("label") else info.get("name") or f.stem
+        # the built-in one is named in the language files; a user's keeps what was typed
+        name = msg("template.noHeader") if f.stem == "plain" else info.get("name") or f.stem
         out.append({"id": f.stem, "name": name, "order": int(info.get("order", 50))})
     # lowest "order" first; the first template is the default for new drafts
     out.sort(key=lambda t: (t["order"], str(t["name"])))
@@ -522,7 +530,7 @@ def delete_template(tpl_id: str, admin_token: str = ""):
 @app.get("/api/formats")
 def formats():
     can = convert.available()
-    return {"formats": [{"id": k, "label": wire(v["label"]), "available": can.get(k, False)} for k, v in convert.FORMATS.items()]}
+    return {"formats": [{"id": k, "label": v["label"], "available": can.get(k, False)} for k, v in convert.FORMATS.items()]}
 
 
 @app.post("/api/convert")
@@ -554,32 +562,27 @@ async def set_lang(request: Request):
     if lang not in languages():
         _err(400, msg("server.unknownLanguage"))
     Path(os.environ["DOCSCAN_LANG_FILE"]).write_text(lang, encoding="utf-8")
-    os.environ["DOCSCAN_LANG"] = lang  # /js/lang-default.js from now on
+    os.environ["DOCSCAN_LANG"] = lang  # the default in /i18n/all.js from now on
     return {"lang": lang}
 
 
 # ------------------------------------------------------------------ web app
-@app.get("/js/lang-default.js")
-def lang_default():
-    """The interface language until the user picks one (web/js/i18n.js): DOCSCAN_LANG, which the Windows program
-    sets from the language its installer ran in (desktop/app.py), or an office server's admin sets. Arabic if unset."""
-    lang = os.environ.get("DOCSCAN_LANG", "")
-    body = f"window.HARF_LANG_DEFAULT = {json.dumps(lang)};\n" if lang in languages() else ""
-    return Response(body, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
-
-
-@lru_cache(maxsize=1)
-def _all_languages() -> tuple[str, str]:
-    body = "".join(f"I18N.add({json.dumps(code)}, {json.dumps({'_meta': meta, **entries}, ensure_ascii=False)});\n"
-                   for code in languages() for meta, entries in [language_file(code)])
+@lru_cache(maxsize=8)
+def _all_languages(default: str) -> tuple[str, str]:
+    body = f"window.HARF_LANG_DEFAULT = {json.dumps(default)};\n" if default else ""
+    body += "".join(f"I18N.add({json.dumps(code)}, {json.dumps({'_meta': meta, **entries}, ensure_ascii=False)});\n"
+                    for code in languages() for meta, entries in [language_file(code)])
     return body, '"' + hashlib.sha1(body.encode("utf-8")).hexdigest()[:16] + '"'
 
 
 @app.get("/i18n/all.js")
 def all_languages(request: Request):
-    """Every language file (web/i18n/*.json) as one script, so adding a language is adding its file. Built once; the
-    browser asks again each load (no-cache) and gets 304 while it has the same one."""
-    body, etag = _all_languages()
+    """Every language file (web/i18n/*.json) as one script, so adding a language is adding its file; first the
+    interface language until the user picks one (web/js/i18n.js): DOCSCAN_LANG, which the Windows program sets from
+    its installer's language or the pick in Settings (desktop/app.py, /api/lang), or an office server's admin sets.
+    Built once per default; the browser asks again each load (no-cache) and gets 304 while it has the same one."""
+    lang = os.environ.get("DOCSCAN_LANG", "")
+    body, etag = _all_languages(lang if lang in languages() else "")
     headers = {"Cache-Control": "no-cache", "ETag": etag}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)

@@ -22,7 +22,8 @@ function load(lang) {
   return ctx;
 }
 const I18N = load().I18N;
-const SOURCE = I18N.dict('ar');
+const entries = ({ _meta, ...e }) => e;  // a language file without its _meta
+const SOURCE = entries(FILES.ar);
 const NAME = /^[a-z][A-Za-z]*\.[A-Za-z][A-Za-z0-9]*$/;
 const AREAS = new Set(Object.keys(SOURCE).map((k) => k.split('.')[0]));
 
@@ -117,14 +118,11 @@ function pyFiles() {
 const PY = pyFiles();
 const pyCalled = PY.flatMap((s) => [...s.matchAll(/\b(?:msg|doc|tr)\(\s*"([^"\n]*)"/g)].map((m) => m[1]));
 const pyQuoted = PY.flatMap((s) => [...s.matchAll(/"([a-z][A-Za-z]*\.[A-Za-z][A-Za-z0-9]*)"/g)].map((m) => m[1]));
-// a built-in header template's name (templates/*.json "label")
-const templateNames = fs.readdirSync(path.join(ROOT, 'templates')).filter((f) => f.endsWith('.json'))
-  .map((f) => JSON.parse(read('templates/' + f)).label).filter(Boolean);
 
 // names the code asks for, which must exist
 const asked = [
   ...SOURCES.flatMap(([, src]) => [...src.matchAll(/\b(?:tx|I18N\.t)\(\s*'([^'\n]*)'/g)].map((m) => m[1])),
-  ...PAGES.flatMap(pageNames), ...pyCalled, ...templateNames,
+  ...PAGES.flatMap(pageNames), ...pyCalled,
 ];
 // any quoted name counts as used (a name can sit in a table and reach tx() through a variable)
 const used = new Set([...asked, ...ALL.map((l) => l.text).filter((t) => NAME.test(t)), ...pyQuoted]);
@@ -169,7 +167,7 @@ const other = (v) => (typeof v === 'object' ? v.other : v);
 const within = (form, of) => holes(form).split(',').every((h) => !h || holes(of).split(',').includes(h));
 
 for (const code of CODES) {
-  const D = I18N.dict(code);
+  const D = entries(FILES[code]);
   const ltr = FILES[code]._meta.dir === 'ltr';
   if (code !== 'ar') {
     test(`${code}: exactly the names in ar.json`, () => {
@@ -192,7 +190,7 @@ for (const code of CODES) {
 
 test('en: each line is the right sentence (digits and names carry over from the Arabic)', () => {
   // catches a translation put against the wrong name, which the {values} check alone does not
-  const D = I18N.dict('en');
+  const D = entries(FILES.en);
   const marks = (s) => (String(s).match(/[0-9]+|[A-Za-z][A-Za-z.]*[A-Za-z]/g) || []);
   const bad = Object.entries(D).filter(([k, v]) => {
     const got = forms(v).join(' ');
@@ -214,7 +212,6 @@ test('Arabic plural forms', () => {
 test('English: zero and plural forms, a message inside a message, direction', () => {
   const { tx, I18N: en } = load('en');
   assert.strictEqual(en.lang(), 'en');
-  assert.strictEqual(en.dir(), 'ltr');
   assert.strictEqual(tx('app.pageCount', { n: 0 }), 'No pages');
   assert.strictEqual(tx('app.pageCount', { n: 1 }), '1 page');
   assert.strictEqual(tx('app.pageCount', { n: 12 }), '12 pages');
@@ -247,4 +244,18 @@ test('a name that says a side says the same side as its Arabic', () => {
     return s && !JSON.stringify(v).includes(s.toLowerCase() === 'right' ? 'يم' : 'يس');
   }).map(([k]) => k);
   assert.deepStrictEqual(bad, []);
+});
+
+test('revive: a server message ({ key, args } only) becomes its text, nested too; other objects stay', () => {
+  const { I18N: en } = load('en');
+  const reply = JSON.parse(JSON.stringify({
+    label: { key: 'reader.tesseractFast', args: {} },
+    error: { key: 'server.couldntDownloadExtraReaders', args: { error: { key: 'server.couldntReadEasyocr', args: { error: 'x' } } } },
+    engine: { id: 'claude', key: 'claude' },
+    failed: { error: 'شيء', key: 'server.draftNotFound', args: {} },
+  }), en.revive);
+  assert.strictEqual(reply.label, 'Tesseract (fast)');
+  assert.strictEqual(reply.error, "Couldn't download the extra readers: Couldn't read with EasyOCR: x");
+  assert.deepStrictEqual(reply.engine, { id: 'claude', key: 'claude' });
+  assert.strictEqual(en.message(reply.failed), 'Draft not found');
 });

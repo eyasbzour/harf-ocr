@@ -90,6 +90,9 @@ async function seed(api) {
         await page.setInputFiles('#tplFile', path.join(__dirname, '..', 'blank.docx'));
         await page.click('#btnTplAdd'); await page.waitForTimeout(800);
         const names = await page.$$eval('#templateSel option, #tplList li', (ns) => ns.map((n) => n.textContent.trim()));
+        for (const tpl of (await (await page.request.get(BASE + '/api/templates')).json()).templates) {
+          if (tpl.id !== 'plain') await page.request.delete(`${BASE}/api/templates/${tpl.id}`);
+        }
         check(`${tag} templates after adding one: named in the language`,
           names.length > 1 && !names.some((n) => n.includes('[object') || /\btemplate\./.test(n))
           && (lang !== 'en' || names.some((n) => n.startsWith('No header'))), JSON.stringify(names));

@@ -1,11 +1,11 @@
 """Text in every interface language, by name, from the same files as the browser (web/i18n/<code>.json, read by
 web/js/i18n.js too). Arabic is the source: the text a name falls back to.
 
-msg(): a message for the screen. It is the Arabic text, and also carries its name and values, so a reply sends
-{"error", "key", "args"} (payload) and the browser shows it in the chosen language.
+msg(): a message for the screen. It is the Arabic text, and also carries its name and values, so a reply sends it as
+{key, args} (to_json) and the browser shows it in the chosen language.
 
 doc(): text the readers write into the document (doc.* names): a note on an uncertain word, "[توقيع]" in place of a
-signature. It follows the page's language, not the interface's: in_language() renders it for the page.
+signature. It follows the page's language, not the interface's: engines/common.py in_language() renders it.
 """
 from __future__ import annotations
 
@@ -53,11 +53,11 @@ class _Format(string.Formatter):
 
 def render(lang: str, key: str, **args) -> str:
     """The text of a name in lang (else Arabic), its values filled in, and in lang too when they are messages."""
-    entries = language_file(lang)[1] if lang in languages() else {}
-    v = entries.get(key, language_file(SOURCE)[1][key])
+    lang = lang if lang in languages() else SOURCE
+    v = language_file(lang)[1].get(key) or language_file(SOURCE)[1][key]
     if isinstance(v, dict):
         n = args.get("n")
-        v = (n == 0 and v.get("zero")) or v.get(_plural(lang if lang in languages() else SOURCE, n)) or v["other"]
+        v = (n == 0 and v.get("zero")) or v.get(_plural(lang, n)) or v["other"]
     if not args:
         return v
     return _Format().format(v, **{k: render(lang, x.key, **x.args) if isinstance(x, Msg) else str(_of(x))
@@ -91,37 +91,24 @@ def _of(v):
     return v
 
 
-def wire(v):
-    """A message as the browser reads it, {key, args} (I18N.message, I18N.t); other values as text."""
+def to_json(v):
+    """A reply's content with every message as {key, args}, at any depth, so the browser shows it in its language
+    (web/js/i18n.js I18N.revive); an exception as its message, or its text. main.py's Reply sends every reply so."""
     v = _of(v)
     if isinstance(v, Msg):
-        return {"key": v.key, "args": {k: wire(x) for k, x in v.args.items()}}
-    return str(v)
+        return {"key": v.key, "args": {k: to_json(x) for k, x in v.args.items()}}
+    if isinstance(v, BaseException):
+        return str(v)
+    if isinstance(v, dict):
+        return {k: to_json(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [to_json(x) for x in v]
+    return v
 
 
 def payload(m) -> dict:
-    """{"error": the Arabic text, "key", "args"} for a reply; an exception's message when it has one."""
+    """An error reply: {"error": the Arabic text, "key", "args"}; an exception's message when it has one."""
     m = _of(m)
     if isinstance(m, Msg):
-        return {"error": str(m), **wire(m)}
+        return {"error": str(m), "key": m.key, "args": m.args}
     return {"error": str(m)}
-
-
-def in_language(blocks: list[dict], lang: str) -> list[dict]:
-    """The doc() text in the blocks (segments' text and notes, in paragraphs and table cells) in lang. Arabic stays
-    as it is: the messages are Arabic already."""
-    if lang == SOURCE:
-        return blocks
-
-    def segs(ss):
-        for sg in ss or []:
-            for k in ("s", "note"):
-                if isinstance(sg.get(k), Msg):
-                    sg[k] = render(lang, sg[k].key, **sg[k].args)
-
-    for b in blocks:
-        segs(b.get("segs"))
-        for row in b.get("rows") or []:
-            for cell in row:
-                segs(cell)
-    return blocks

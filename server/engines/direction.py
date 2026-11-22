@@ -11,7 +11,7 @@ import re
 
 from PIL import Image, ImageOps
 
-from .common import Line, Word
+from .common import Line, Word, seg_lists
 
 LATIN = re.compile(r"[A-Za-z]")
 ARABIC = re.compile(r"[؀-ۿ]")
@@ -29,9 +29,7 @@ def is_ltr(lines: list[Line]) -> bool:
 
 def blocks_text(blocks: list[dict]) -> str:
     """The text of a page's blocks, table cells included."""
-    segs = [sg for b in blocks for part in ([c for row in b.get("rows") or [] for c in row] or [b.get("segs") or []])
-            for sg in part]
-    return " ".join(str(sg.get("s", "")) for sg in segs) + " ".join(str(b.get("text", "")) for b in blocks)
+    return " ".join(str(sg.get("s", "")) for segs in seg_lists(blocks) for sg in segs)
 
 
 def in_reading_order(lines: list[Line]) -> list[Line]:
@@ -100,21 +98,16 @@ def unmirror_blocks(blocks: list[dict]) -> list[dict]:
     def fix(box):
         return [round(1 - box[2], 4), box[1], round(1 - box[0], 4), box[3]]
 
-    def segs(ss):
-        for sg in ss or []:
-            if sg.get("box"):
-                sg["box"] = fix(sg["box"])
-
     for b in blocks:
         b["dir"] = "ltr"
         if b.get("box"):
             b["box"] = fix(b["box"])
         if b.get("lines"):
             b["lines"] = [fix(ln[:4]) + ln[4:] for ln in b["lines"]]
-        segs(b.get("segs"))
         for row in b.get("cellBoxes") or []:
             row[:] = [fix(c) if c else c for c in row]
-        for row in b.get("rows") or []:
-            for cell in row:
-                segs(cell)
+    for segs in seg_lists(blocks):
+        for sg in segs:
+            if sg.get("box"):
+                sg["box"] = fix(sg["box"])
     return blocks

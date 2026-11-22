@@ -17,7 +17,7 @@ import threading
 import urllib.request
 import zipfile
 from pathlib import Path
-from messages import msg, payload
+from messages import msg
 
 REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
@@ -100,6 +100,6 @@ def _run() -> None:
     except _Stopped:
         _state.update(state="idle", done=0, total=0, error="")
     except Exception as e:
-        _state.update(state="error", error=payload(msg("server.couldntDownloadExtraReaders", error=e)))
+        _state.update(state="error", error=msg("server.couldntDownloadExtraReaders", error=e))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

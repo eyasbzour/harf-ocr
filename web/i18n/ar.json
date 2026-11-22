@@ -631,9 +631,10 @@
   "doc.machineReadingCantReadPhoto": "{label} في الصورة لا تقرؤه القراءة الآلية بدقة.{guess} اكتب نصه هنا أو احذف هذا الموضع.",
   "doc.numberTesseractReadPaddleocrMissed": "رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة",
   "doc.uncertain": "غير مؤكد",
-  "doc.notesPlaceApproximate": "(موضع الملاحظة تقريبي) ",
+  "doc.notesPlaceApproximate": "(موضع الملاحظة تقريبي) {note}",
   "doc.note": "ملاحظة",
   "doc.unreadable": "غير مقروء",
   "app.readerQuote": "{reader}: «{text}»",
-  "editor.tableSize": "{rows} × {cols}"
+  "editor.tableSize": "{rows} × {cols}",
+  "doc.notesJoined": "{first}\n{second}"
 }

@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from engines.common import low_note  # noqa: E402
 from engines.marks import LABELS, note_for  # noqa: E402
-from messages import Msg, doc, in_language, language_file, languages, msg, payload, render  # noqa: E402
+from engines.common import in_language  # noqa: E402
+from messages import doc, language_file, languages, msg, payload, render, to_json  # noqa: E402
 
 SERVER = Path(__file__).resolve().parent.parent
 FILES = [p for p in SERVER.rglob("*.py") if "tests" not in p.parts] + [SERVER.parent / "desktop" / "app.py"]
@@ -97,7 +98,7 @@ def client():
 
 def test_payload_carries_the_name_and_nested_messages():
     inner = RuntimeError(msg("server.couldntReadEasyocr", error="boom"))
-    p = payload(msg("server.couldntDownloadExtraReaders", error=inner))
+    p = to_json(payload(msg("server.couldntDownloadExtraReaders", error=inner)))
     assert p["key"] == "server.couldntDownloadExtraReaders"
     assert p["args"]["error"] == {"key": "server.couldntReadEasyocr", "args": {"error": "boom"}}
     assert p["error"] == render("ar", "server.couldntDownloadExtraReaders", error=render("ar", "server.couldntReadEasyocr", error="boom"))
@@ -116,21 +117,21 @@ def test_an_unknown_path_still_gets_fastapis_reply(client):
     assert r.status_code == 404 and "key" not in r.json()
 
 
-def test_labels_go_out_as_names(client):
+def test_messages_go_out_as_names_in_any_field(client):
     eng = {e["id"]: e["label"] for e in client.get("/api/engines").json()["engines"]}
     assert eng["paddle"] == {"key": "reader.paddleocrRecommended", "args": {}} and eng["easyocr"] == "EasyOCR"
     tpl = client.get("/api/templates").json()["templates"]
     assert {"key": "template.noHeader", "args": {}} in [t["name"] for t in tpl]
 
 
-def test_lang_default_and_all_languages(client, monkeypatch):
+def test_all_languages_with_the_default(client, monkeypatch):
     monkeypatch.setenv("DOCSCAN_LANG", "en")
-    assert client.get("/js/lang-default.js").text.strip() == 'window.HARF_LANG_DEFAULT = "en";'
-    monkeypatch.setenv("DOCSCAN_LANG", "xx")  # no such language file
-    assert client.get("/js/lang-default.js").text == ""
     body = client.get("/i18n/all.js").text
+    assert body.startswith('window.HARF_LANG_DEFAULT = "en";\n')
     for code in languages():
         assert f'I18N.add("{code}", {{"_meta"' in body
+    monkeypatch.setenv("DOCSCAN_LANG", "xx")  # no such language file: no default
+    assert client.get("/i18n/all.js").text.startswith("I18N.add(")
 
 
 def test_language_files():
@@ -158,8 +159,9 @@ def test_an_english_page_gets_english_notes_and_labels():
 def test_an_arabic_page_keeps_its_arabic():
     blocks = [{"type": "p", "segs": [{"s": "x", "note": low_note(40)}]}]
     in_language(blocks, "ar")
-    assert blocks[0]["segs"][0]["note"] == SOURCE["doc.uncertainReadingConfidenceCompareOriginal"].format(conf=40)
-    assert isinstance(blocks[0]["segs"][0]["note"], Msg)
+    note = blocks[0]["segs"][0]["note"]
+    # plain text: a message left in would reach the browser as {key, args} and come out in the interface's language
+    assert note == SOURCE["doc.uncertainReadingConfidenceCompareOriginal"].format(conf=40) and type(note) is str
 
 
 def test_render_plurals_and_fallback():
@@ -183,11 +185,21 @@ def test_claude_and_google_notes_follow_the_page(monkeypatch):
         return [{"type": "p", "segs": [{"s": "The quarterly report of the archive department is attached "},
                                        {"s": "here", "note": low_note(40)}]}]
     monkeypatch.setattr(ai_engines, "run_google", english)
-    out = engines.run("google", buf.getvalue(), api_key="k")
-    assert out[0]["segs"][1]["note"] == "Uncertain reading (confidence 40%). Compare it with the original photo."
+    out, lang = engines.run("google", buf.getvalue(), api_key="k")
+    assert lang == "en" and out[0]["segs"][1]["note"] == "Uncertain reading (confidence 40%). Compare it with the original photo."
     # a spot read again keeps the page's language, whatever the cut-out looks like
-    out = engines.run("google", buf.getvalue(), api_key="k", doc_lang="ar")
-    assert isinstance(out[0]["segs"][1]["note"], Msg)
+    out, lang = engines.run("google", buf.getvalue(), api_key="k", doc_lang="ar")
+    assert lang == "ar" and out[0]["segs"][1]["note"] == SOURCE["doc.uncertainReadingConfidenceCompareOriginal"].format(conf=40)
+
+
+def test_a_claude_note_placed_roughly_is_in_the_page_language():
+    from engines.ai_engines import _attach_note
+
+    blocks = [{"type": "p", "segs": [{"s": "Dear Director,", "note": low_note(30)}]}]
+    _attach_note(blocks, "nowhere on the page", "A stamp")
+    in_language(blocks, "en")
+    assert blocks[0]["segs"][0]["note"] == ("Uncertain reading (confidence 30%). Compare it with the original photo.\n"
+                                            "(the note's place is approximate) A stamp")
 
 
 def test_lang_refuses_a_body_that_is_not_an_object(client, monkeypatch, tmp_path):

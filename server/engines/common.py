@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image, ImageOps
-from messages import doc
+from messages import Msg, doc, render
 
 BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 # kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
@@ -529,3 +529,24 @@ def fragments_to_lines(frags: list[tuple[list, str, float]]) -> list[Line]:
         lines.append(Line(drop_junk(words), min(r["x0"] for r in row), min(r["y0"] for r in row),
                           max(r["x1"] for r in row), max(r["y1"] for r in row)))
     return lines
+
+
+def seg_lists(blocks: list[dict]):
+    """Every list of segments on a page: each paragraph's, and each table cell's."""
+    for b in blocks:
+        if b.get("type") == "table":
+            for row in b.get("rows") or []:
+                yield from row
+        else:
+            yield b.get("segs") or []
+
+
+def in_language(blocks: list[dict], lang: str) -> list[dict]:
+    """The doc() text in the blocks (segments' text and notes) rendered in lang: the page's language, which the
+    document keeps whatever the interface's (engines/__init__.py run)."""
+    for segs in seg_lists(blocks):
+        for sg in segs:
+            for k in ("s", "note"):
+                if isinstance(sg.get(k), Msg):
+                    sg[k] = render(lang, sg[k].key, **sg[k].args)
+    return blocks

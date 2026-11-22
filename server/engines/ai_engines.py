@@ -11,7 +11,7 @@ import os
 import re
 from importlib.util import find_spec
 
-from .common import EngineError, Word, low_note, to_jpeg
+from .common import EngineError, Word, low_note, seg_lists, to_jpeg
 from messages import doc, msg, render
 
 MARK = re.compile(r"\[\[(.*?)\|\|(.*?)\]\]", re.S)
@@ -64,17 +64,8 @@ def _text_to_segs(text: str) -> list[dict]:
 def _attach_note(blocks: list[dict], anchor: str, note: str) -> None:
     anchor = (anchor or "").strip()
 
-    def seg_lists():
-        for b in blocks:
-            if b["type"] == "table":
-                for row in b.get("rows", []):
-                    for cell in row:
-                        yield cell
-            else:
-                yield b["segs"]
-
     if anchor:
-        for segs in seg_lists():
+        for segs in seg_lists(blocks):
             for i, sg in enumerate(segs):
                 if sg.get("note") is None and anchor in sg["s"]:
                     a = sg["s"].index(anchor)
@@ -88,17 +79,14 @@ def _attach_note(blocks: list[dict], anchor: str, note: str) -> None:
                     segs[i:i + 1] = parts
                     return
                 if sg.get("note") is not None and anchor in sg["s"]:
-                    sg["note"] += "\n" + note
+                    sg["note"] = doc("doc.notesJoined", first=sg["note"], second=note)
                     return
     # anchor not found: attach to the first text on the page
-    for segs in seg_lists():
+    for segs in seg_lists(blocks):
         for sg in segs:
             if sg["s"].strip():
-                prefix = doc("doc.notesPlaceApproximate")
-                if sg.get("note"):
-                    sg["note"] += "\n" + prefix + note
-                else:
-                    sg["note"] = prefix + note
+                placed = doc("doc.notesPlaceApproximate", note=note)
+                sg["note"] = doc("doc.notesJoined", first=sg["note"], second=placed) if sg.get("note") else placed
                 return
     blocks.append({"type": "p", "bold": False, "segs": [{"s": doc("doc.note"), "note": note}]})
 
