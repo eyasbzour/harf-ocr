@@ -74,7 +74,7 @@ def install(quit_app) -> None:
     """Download the newer installer and start it; then close the program (quit_app) so it can be replaced."""
     info = _state["info"] or check()
     if not info:
-        raise RuntimeError(msg("لا يوجد تحديث"))
+        raise RuntimeError(msg("server.noUpdate"))
     path = os.path.join(tempfile.gettempdir(), f"HarfOCR-Setup-{info['version']}.exe")
     req = urllib.request.Request(info["url"], headers={"User-Agent": "HarfOCR-updater"})
     with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:

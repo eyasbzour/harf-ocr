@@ -1,6 +1,6 @@
-// Every language misses nothing: every Arabic string in the code, the static pages, the server's messages and the
-// Windows program's launcher has its entry in each language file (web/i18n/<code>.js), and no entry is left over.
-// node --test web/js/*.test.js
+// The interface text, by name (web/js/i18n.js). No Arabic text is left in the code or the static pages; every name
+// the code, the pages, the server and the Windows program's launcher use is in web/i18n/ar.json (the source), and
+// every language file has exactly those names, with the same {values}. node --test web/js/*.test.js
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -10,29 +10,30 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..', '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const AR = /[؀-ۿ]/;
-const CODES = fs.readdirSync(path.join(ROOT, 'web/i18n')).filter((f) => f.endsWith('.js')).map((f) => f.slice(0, -3)).sort();
+const CODES = fs.readdirSync(path.join(ROOT, 'web/i18n')).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort();
+const FILES = Object.fromEntries(CODES.map((c) => [c, JSON.parse(read(`web/i18n/${c}.json`))]));
 
-// a page's I18N, with every language file loaded, as the server's /i18n/all.js does; lang: the chosen one
+// a page's I18N with every language file loaded, as the server's /i18n/all.js does; lang: the chosen one
 function load(lang) {
   const ctx = { Intl, String, Object, HARF_LANG_DEFAULT: lang };
   vm.createContext(ctx);
   vm.runInContext(read('web/js/i18n.js'), ctx);
-  for (const code of CODES) vm.runInContext(read(`web/i18n/${code}.js`), ctx);
+  for (const c of CODES) ctx.I18N.add(c, JSON.parse(JSON.stringify(FILES[c])));
   return ctx;
 }
 const I18N = load().I18N;
-const LANG_INFO = I18N.languages();
-const norm = I18N.norm;
+const SOURCE = I18N.dict('ar');
+const NAME = /^[a-z][A-Za-z]*\.[A-Za-z][A-Za-z0-9]*$/;
+const AREAS = new Set(Object.keys(SOURCE).map((k) => k.split('.')[0]));
 
-// ---- where the keys come from
-// A small JavaScript lexer: the string and template literals of a source, past comments and regex literals.
-// A template's "text" is its fixed parts only: the literals inside its ${...} are listed on their own.
+// A small JavaScript lexer: the string and template literals of a source, past comments and regex literals (which
+// may hold Arabic: patterns over the document's text). A template's "text" is its fixed parts only.
 const AFTER_REGEX_OK = /^(?:[(,=:[!&|?{;+\-*%<>~^]|return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await)$/;
 function lex(src) {
   const out = [];
   let i = 0, prev = '';
   const n = src.length;
-  const add = (at, raw, text, template) => out.push({ at, raw, text, template });
+  const add = (raw, text) => out.push({ raw, text });
   function quoted(q) {
     const s = i++;
     while (i < n && src[i] !== q) i += src[i] === '\\' ? 2 : 1;
@@ -57,8 +58,8 @@ function lex(src) {
       if (stop && c === '}' && depth === 0) return;
       if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
       if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i + 2) + 2; continue; }
-      if (c === "'" || c === '"') { const at = i, raw = quoted(c); add(at, raw, unquote(raw), false); prev = 'str'; continue; }
-      if (c === '`') { const at = i, [raw, fixed] = template(); add(at, raw, fixed, true); prev = 'str'; continue; }
+      if (c === "'" || c === '"') { const raw = quoted(c); add(raw, unquote(raw)); prev = 'str'; continue; }
+      if (c === '`') { const [raw, fixed] = template(); add(raw, fixed); prev = 'str'; continue; }
       if (c === '/' && (!prev || AFTER_REGEX_OK.test(prev))) {
         i++;
         for (let cls = false; i < n && src[i] !== '\n'; i++) {
@@ -83,15 +84,8 @@ function lex(src) {
 }
 const unquote = (s) => s.slice(1, -1).replace(/\\(['"`\\])/g, '$1').replace(/\\n/g, '\n');
 
-// Arabic literals in a JS source, each with what comes just before it
-function arabicLiterals(file, src) {
-  return lex(src).filter((l) => AR.test(l.text)).map((l) => ({ ...l, file, before: src.slice(Math.max(0, l.at - 40), l.at) }));
-}
-const jsLiterals = (file) => arabicLiterals(file, read(file));
 const JS = fs.readdirSync(path.join(ROOT, 'web/js')).filter((f) => f.endsWith('.js') && !f.endsWith('.test.js') && f !== 'i18n.js')
   .map((f) => 'web/js/' + f);
-// a literal that is a key: the first argument of tx() or I18N.t()
-const KEYED = /(?:\btx|I18N\.t)\(\s*$/;
 // Arabic that is not interface text: patterns and digit tables, named here one by one
 const NOT_TEXT = new Set([
   'web/js/editor.js|١.', 'web/js/editor.js|٢.', 'web/js/editor.js|٣.',  // list marker samples: Hindi digits
@@ -100,138 +94,146 @@ const NOT_TEXT = new Set([
   'web/js/docx-export.js|مراجع',  // the comment author when a caller gives none; app.js always gives one
 ]);
 
-function htmlKeys(file) {
-  const src = read(file).replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, '')
-    .replace(/<(\w+)\b[^>]*\btranslate="no"[^>]*>[\s\S]*?<\/\1>/g, '');  // never translated: language names
-  const keys = [];
-  for (const m of src.matchAll(/>([^<]+)</g)) if (AR.test(m[1])) keys.push(norm(m[1]));
-  for (const m of src.matchAll(/\s(?:title|aria-label|placeholder|alt|data-short)="([^"]*)"/g)) if (AR.test(m[1])) keys.push(norm(m[1]));
-  return keys;
-}
-function pageScriptLiterals(file) {
-  return [...read(file).matchAll(/<script>([\s\S]*?)<\/script>/g)].flatMap((m) => arabicLiterals(file, m[1]));
-}
-// the server's messages: msg("...") (server/messages.py)
-function serverKeys() {
-  const keys = [];
+const PAGES = ['web/index.html', 'web/phone.html'];
+// each browser source: a JS file, or a page's inline scripts
+const SOURCES = JS.map((f) => [f, read(f)])
+  .concat(PAGES.map((f) => [f, [...read(f).matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n')]));
+const ALL = SOURCES.flatMap(([file, src]) => lex(src).map((l) => ({ ...l, file })));
+// a page without its comments, scripts and styles
+const markup = (file) => read(file).replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, '');
+const pageNames = (file) => [...markup(file).matchAll(/\sdata-i18n(?:-[a-z-]+)?="([^"]*)"/g)].map((m) => m[1]);
+
+// the server's and the launcher's names: msg("..."), doc("..."), tr("...") (server/messages.py, desktop/app.py),
+// and every other quoted name in them (a table of names, as in Claude's instructions)
+function pyFiles() {
+  const out = [];
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
     const p = path.join(d, e.name);
-    if (e.isDirectory()) { if (!/tests|__pycache__/.test(e.name)) walk(p); } else if (e.name.endsWith('.py')) {
-      for (const m of fs.readFileSync(p, 'utf8').matchAll(/\bmsg\(\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g)) keys.push(m[1] ?? m[2]);
-    }
+    if (e.isDirectory()) { if (!/^(tests|__pycache__)$/.test(e.name)) walk(p); } else if (e.name.endsWith('.py')) out.push(p);
   });
   walk(path.join(ROOT, 'server'));
-  return keys;
+  return out.concat(path.join(ROOT, 'desktop/app.py')).map((p) => fs.readFileSync(p, 'utf8'));
 }
-// the Windows program's launcher: tr("...") (desktop/app.py), for what shows before the page
-const launcherKeys = () => [...read('desktop/app.py').matchAll(/\btr\(\s*"((?:[^"\\\n]|\\.)*)"/g)].map((m) => m[1]);
+const PY = pyFiles();
+const pyCalled = PY.flatMap((s) => [...s.matchAll(/\b(?:msg|doc|tr)\(\s*"([^"\n]*)"/g)].map((m) => m[1]));
+const pyQuoted = PY.flatMap((s) => [...s.matchAll(/"([a-z][A-Za-z]*\.[A-Za-z][A-Za-z0-9]*)"/g)].map((m) => m[1]));
+// a built-in header template's name (templates/*.json "label")
+const templateNames = fs.readdirSync(path.join(ROOT, 'templates')).filter((f) => f.endsWith('.json'))
+  .map((f) => JSON.parse(read('templates/' + f)).label).filter(Boolean);
 
-// the built-in header templates' names (templates/*.json), shown through I18N.t()
-const templateKeys = () => fs.readdirSync(path.join(ROOT, 'templates')).filter((f) => f.endsWith('.json'))
-  .map((f) => JSON.parse(read('templates/' + f)).name).filter((n) => n && AR.test(n));
+// names the code asks for, which must exist
+const asked = [
+  ...SOURCES.flatMap(([, src]) => [...src.matchAll(/\b(?:tx|I18N\.t)\(\s*'([^'\n]*)'/g)].map((m) => m[1])),
+  ...PAGES.flatMap(pageNames), ...pyCalled, ...templateNames,
+];
+// any quoted name counts as used (a name can sit in a table and reach tx() through a variable)
+const used = new Set([...asked, ...ALL.map((l) => l.text).filter((t) => NAME.test(t)), ...pyQuoted]);
 
-const literals = JS.flatMap(jsLiterals).concat(pageScriptLiterals('web/phone.html'), pageScriptLiterals('web/index.html'));
-const used = new Set([
-  ...literals.filter((l) => KEYED.test(l.before)).map((l) => l.text),
-  ...htmlKeys('web/index.html'), ...htmlKeys('web/phone.html'),
-  ...serverKeys(), ...launcherKeys(), ...templateKeys(),
-]);
-
-test('every Arabic literal in the browser code goes through tx()', () => {
-  const loose = literals.filter((l) => !KEYED.test(l.before) && !NOT_TEXT.has(l.file + '|' + l.text));
+test('no Arabic text in the browser code: only named data', () => {
+  const loose = ALL.filter((l) => AR.test(l.text) && !NOT_TEXT.has(l.file + '|' + l.text));
   assert.deepStrictEqual(loose.map((l) => `${l.file}: ${l.raw.slice(0, 80)}`), []);
 });
 
-test('no key is built from a template literal (its values go in {braces})', () => {
-  const bad = literals.filter((l) => l.template);
-  assert.deepStrictEqual(bad.map((l) => `${l.file}: ${l.raw.slice(0, 80)}`), []);
+test('no Arabic text in the static pages: data-i18n names instead', () => {
+  const bad = PAGES.flatMap((f) => [...markup(f).matchAll(/>([^<]*)<|\s[\w-]+="([^"]*)"/g)]
+    .map((m) => m[1] ?? m[2]).filter((s) => AR.test(s)).map((s) => `${f}: ${s.trim().slice(0, 60)}`));
+  assert.deepStrictEqual(bad, []);
 });
 
-test('each language file is I18N.add(code, { name, dir }, entries) for its own code', () => {
-  for (const code of CODES) {
-    const meta = LANG_INFO.find((l) => l.code === code);
-    assert.ok(meta && meta.name && ['ltr', 'rtl'].includes(meta.dir), code);
-  }
+test('a name is a literal: tx() and I18N.t() never get a built string', () => {
+  const bad = SOURCES.flatMap(([, s]) => [...s.matchAll(/\b(?:tx|I18N\.t)\(\s*([^'\s)][^,)]*)/g)].map((m) => m[1]));
+  assert.deepStrictEqual(bad, []);
+});
+
+test('every name asked for is in ar.json', () => {
+  assert.deepStrictEqual([...new Set(asked)].filter((k) => !(k in SOURCE)), []);
+});
+
+test('every quoted name that looks like one of ours is in ar.json', () => {
+  const like = [...used].filter((k) => NAME.test(k) && !/\.(py|js|json|html|css|svg|txt)$/.test(k) && AREAS.has(k.split('.')[0]) && !(k in SOURCE));
+  assert.deepStrictEqual(like, []);
+});
+
+test('no name in ar.json is left unused', () => {
+  assert.deepStrictEqual(Object.keys(SOURCE).filter((k) => !used.has(k)), []);
+});
+
+test('each language file has _meta { name, dir }', () => {
+  for (const c of CODES) assert.ok(FILES[c]._meta && FILES[c]._meta.name && ['ltr', 'rtl'].includes(FILES[c]._meta.dir), c);
   assert.ok(CODES.includes('ar') && CODES.includes('en'));
 });
 
-const holes = (s) => [...new Set([...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort().join(',');
-const within = (form, key) => holes(form).split(',').every((h) => !h || holes(key).split(',').includes(h));
+const holes = (s) => [...new Set([...String(s).matchAll(/\{(\w+)(?:![a-z])?\}/g)].map((m) => m[1]))].sort().join(',');
 const forms = (v) => (typeof v === 'object' ? Object.values(v) : [v]);
+const other = (v) => (typeof v === 'object' ? v.other : v);
+const within = (form, of) => holes(form).split(',').every((h) => !h || holes(of).split(',').includes(h));
 
-// every language but the source (Arabic, the code's own text) has every key, and nothing else
-for (const code of CODES.filter((c) => c !== 'ar')) {
+for (const code of CODES) {
   const D = I18N.dict(code);
-  const ltr = LANG_INFO.find((l) => l.code === code).dir === 'ltr';
-  test(`${code}: every key has an entry`, () => {
-    assert.deepStrictEqual([...used].filter((k) => !(k in D)), []);
-  });
-  test(`${code}: no entry is left over`, () => {
-    assert.deepStrictEqual(Object.keys(D).filter((k) => !used.has(k)), []);
-  });
-  test(`${code}: the same {values} as the Arabic (a plural's "one" may leave out {n})`, () => {
-    const bad = Object.entries(D).filter(([k, v]) => typeof v === 'object'
-      ? holes(v.other) !== holes(k) || !forms(v).every((f) => within(f, k))
-      : holes(v) !== holes(k)).map(([k]) => k);
+  const ltr = FILES[code]._meta.dir === 'ltr';
+  if (code !== 'ar') {
+    test(`${code}: exactly the names in ar.json`, () => {
+      assert.deepStrictEqual({ missing: Object.keys(SOURCE).filter((k) => !(k in D)), extra: Object.keys(D).filter((k) => !(k in SOURCE)) },
+        { missing: [], extra: [] });
+    });
+  }
+  test(`${code}: the same {values} as the Arabic (a plural form may leave out {n})`, () => {
+    const bad = Object.entries(D).filter(([k, v]) => k in SOURCE
+      && (holes(other(v)) !== holes(other(SOURCE[k])) || !forms(v).every((f) => within(f, other(SOURCE[k]))))).map(([k]) => k);
     assert.deepStrictEqual(bad, []);
   });
-  test(`${code}: plain text: no dashes or curly quotes${ltr ? ', no Arabic letters' : ''}`, () => {
-    const bad = Object.entries(D).filter(([, v]) => forms(v).some((f) => typeof f !== 'string' || !f.trim()
-      || /[–—‘’“”]/.test(f) || (ltr && AR.test(f)))).map(([k]) => k);
+  test(`${code}: plain text (no dashes or curly quotes${ltr ? ', no Arabic letters' : ''}), plurals with one and other`, () => {
+    const bad = Object.entries(D).filter(([, v]) => (typeof v === 'object' && !(v.one && v.other))
+      || forms(v).some((f) => typeof f !== 'string' || !f.trim() || /[–—‘’“”]/.test(f) || (ltr && AR.test(f))))
+      .map(([k]) => k);
     assert.deepStrictEqual(bad, []);
-  });
-  test(`${code}: plurals have one and other`, () => {
-    assert.deepStrictEqual(Object.entries(D).filter(([, v]) => typeof v === 'object' && !(v.one && v.other)).map(([k]) => k), []);
   });
 }
 
-test('Arabic plural forms (web/i18n/ar.js): used keys, an "other" form, the same {values}', () => {
-  const AR_DICT = I18N.dict('ar');
-  const bad = Object.entries(AR_DICT).filter(([k, v]) => !used.has(k) || typeof v !== 'object' || !v.other || !forms(v).every((f) => within(f, k)));
-  assert.deepStrictEqual(bad.map(([k]) => k), []);
-  const ctx = load();
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 0 }), 'بلا صفحات');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 2 }), 'صفحتان');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 7 }), '7 صفحات');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 12 }), '12 صفحة');
-  assert.strictEqual(ctx.tx('{n} صفوف', { n: 1 }), '1 صف');
-});
-
-test('English zero and plural forms, and a message inside a message', () => {
-  const ctx = load('en');
-  assert.strictEqual(ctx.I18N.lang(), 'en');
-  assert.strictEqual(ctx.I18N.dir(), 'ltr');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 0 }), 'No pages');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 1 }), '1 page');
-  assert.strictEqual(ctx.tx('{n} صفحات', { n: 12 }), '12 pages');
-  assert.strictEqual(ctx.I18N.message({ error: 'x', key: 'تعذر تنزيل القرّاء الإضافيين: {error}',
-    args: { error: { key: 'تعذرت القراءة بـ EasyOCR: {error}', args: { error: 'boom' } } } }),
-  "Couldn't download the extra readers: Couldn't read with EasyOCR: boom");
-});
-
-test('tx(): values, plurals, falling back to the Arabic, and an unknown language', () => {
-  const ctx = load('xx');
-  ctx.I18N.add('xx', { name: 'Test', dir: 'ltr' }, { 'صفحة {n}': { one: '{n} page', other: '{n} pages' }, 'مرحباً {name}': 'Hello {name}' });
-  assert.strictEqual(ctx.tx('صفحة {n}', { n: 1 }), '1 page');
-  assert.strictEqual(ctx.tx('صفحة {n}', { n: 3 }), '3 pages');
-  assert.strictEqual(ctx.tx('مرحباً {name}', { name: 'Eyas' }), 'Hello Eyas');
-  assert.strictEqual(ctx.tx('نص بلا ترجمة'), 'نص بلا ترجمة');
-  assert.strictEqual(ctx.I18N.message({ error: 'مرحباً x', key: 'مرحباً {name}', args: { name: 'x' } }), 'Hello x');
-  assert.strictEqual(ctx.I18N.message({ detail: 'غير معروف' }), 'غير معروف');
-  assert.strictEqual(ctx.I18N.message('غير معروف'), 'غير معروف');
-  assert.strictEqual(load('zz').I18N.lang(), 'ar');  // no such file: Arabic
-  assert.strictEqual(load().tx('مرحباً {name}', { name: 'x' }), 'مرحباً x');  // Arabic unless chosen
-});
-
-test('en: spot checks that the English is the right sentence (numbers and names carry over)', () => {
-  // a digit, a Latin name or a file type in the Arabic must be in its English too: catches lines put against the
-  // wrong key, which the {values} check alone does not
+test('en: each line is the right sentence (digits and names carry over from the Arabic)', () => {
+  // catches a translation put against the wrong name, which the {values} check alone does not
   const D = I18N.dict('en');
-  const marks = (s) => (String(s).match(/[0-9]+|[A-Za-z][A-Za-z.]*[A-Za-z]/g) || []).filter((w) => !/^(n|x)$/.test(w));
+  const marks = (s) => (String(s).match(/[0-9]+|[A-Za-z][A-Za-z.]*[A-Za-z]/g) || []);
   const bad = Object.entries(D).filter(([k, v]) => {
-    const want = marks(k.replace(/\{\w+\}/g, ''));
     const got = forms(v).join(' ');
-    return want.some((w) => !got.includes(w));
+    return marks(other(SOURCE[k]).replace(/\{\w+(?:![a-z])?\}/g, '')).some((w) => !got.includes(w));
   }).map(([k]) => k);
   assert.deepStrictEqual(bad, []);
+});
+
+test('Arabic plural forms', () => {
+  const { tx } = load();
+  assert.strictEqual(tx('app.pageCount', { n: 0 }), 'بلا صفحات');
+  assert.strictEqual(tx('app.pageCount', { n: 2 }), 'صفحتان');
+  assert.strictEqual(tx('app.pageCount', { n: 7 }), '7 صفحات');
+  assert.strictEqual(tx('app.pageCount', { n: 12 }), '12 صفحة');
+  assert.strictEqual(tx('editor.rowCount', { n: 1 }), '1 صف');
+  assert.strictEqual(tx('editor.rowCount', { n: 15 }), '15 صفاً');
+});
+
+test('English: zero and plural forms, a message inside a message, direction', () => {
+  const { tx, I18N: en } = load('en');
+  assert.strictEqual(en.lang(), 'en');
+  assert.strictEqual(en.dir(), 'ltr');
+  assert.strictEqual(tx('app.pageCount', { n: 0 }), 'No pages');
+  assert.strictEqual(tx('app.pageCount', { n: 1 }), '1 page');
+  assert.strictEqual(tx('app.pageCount', { n: 12 }), '12 pages');
+  assert.strictEqual(en.message({ error: 'x', key: 'server.couldntDownloadExtraReaders',
+    args: { error: { key: 'server.couldntReadEasyocr', args: { error: 'boom' } } } }),
+  "Couldn't download the extra readers: Couldn't read with EasyOCR: boom");
+  assert.strictEqual(en.languages()[0].code, 'ar');  // the source first
+});
+
+test('tx(): values, falling back to Arabic and then the name; message(); an unknown language', () => {
+  const ctx = load('xx');
+  ctx.I18N.add('xx', { _meta: { name: 'Test', dir: 'ltr' }, 'test.page': { one: '{n} page', other: '{n} pages' }, 'test.hello': 'Hello {name}' });
+  assert.strictEqual(ctx.tx('test.page', { n: 1 }), '1 page');
+  assert.strictEqual(ctx.tx('test.page', { n: 3 }), '3 pages');
+  assert.strictEqual(ctx.tx('test.hello', { name: 'Eyas' }), 'Hello Eyas');
+  assert.strictEqual(ctx.tx('ui.save'), SOURCE['ui.save']);  // not in xx: the Arabic
+  assert.strictEqual(ctx.tx('no.suchName'), 'no.suchName');
+  assert.strictEqual(ctx.I18N.message({ error: 'مرحباً x', key: 'test.hello', args: { name: 'x' } }), 'Hello x');
+  assert.strictEqual(ctx.I18N.message({ detail: 'Not Found' }), 'Not Found');
+  assert.strictEqual(ctx.I18N.message('Google Vision'), 'Google Vision');  // plain text stays as it is
+  assert.strictEqual(load('zz').I18N.lang(), 'ar');  // no such file: Arabic
 });

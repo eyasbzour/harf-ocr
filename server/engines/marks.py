@@ -19,7 +19,7 @@ from PIL import Image
 from .common import Line
 from messages import doc
 
-LABELS = {"hand": doc("تأشيرة بخط اليد"), "sign": doc("توقيع"), "stamp": doc("ختم")}
+LABELS = {"hand": doc("doc.handwrittenNote"), "sign": doc("doc.signature"), "stamp": doc("doc.stamp")}
 
 
 def ink_masks(colour: Image.Image) -> tuple[np.ndarray, np.ndarray]:
@@ -38,8 +38,8 @@ def ink_masks(colour: Image.Image) -> tuple[np.ndarray, np.ndarray]:
 
 def note_for(kind: str, text: str) -> str:
     label = LABELS[kind]
-    guess = doc(" القراءة الآلية التقريبية: «{text}».", text=text) if text else ""
-    return doc("{label} في الصورة لا تقرؤه القراءة الآلية بدقة.{guess} اكتب نصه هنا أو احذف هذا الموضع.", label=label, guess=guess)
+    guess = doc("doc.roughMachineReading", text=text) if text else ""
+    return doc("doc.machineReadingCantReadPhoto", label=label, guess=guess)
 
 
 def _kind(box: tuple, h: float, page_h: float) -> str:
@@ -137,5 +137,5 @@ def split_marks(lines: list[Line], colour: Image.Image, read_size: tuple[int, in
             merged.append(dict(m))
     for m in merged:
         m["kind"] = _kind(m["box"], h, read_size[1])
-        m["label"], m["note"] = doc("[{label}]", label=LABELS[m["kind"]]), note_for(m["kind"], m["text"])
+        m["label"], m["note"] = doc("doc.bracketLabel", label=LABELS[m["kind"]]), note_for(m["kind"], m["text"])
     return kept, merged

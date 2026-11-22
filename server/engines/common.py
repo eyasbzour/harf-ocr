@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image, ImageOps
 from messages import doc
 
-BIDI_MARKS = re.compile(r"[‎‏‪-‮⁦-⁩]")
+BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 # kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
 # Only between two letters: the one after a short prefix ("بـ PaddleOCR") is meant.
 KASHIDA = re.compile(r"(?<=[ء-ي])ـ+(?=[ء-ي])")
@@ -134,7 +134,7 @@ def clean_word(text: str) -> str:
 
 
 def low_note(conf: float) -> str:
-    return doc("قراءة غير مؤكدة (درجة الثقة {conf}%)، قارن مع الصورة الأصلية", conf=round(conf))
+    return doc("doc.uncertainReadingConfidenceCompareOriginal", conf=round(conf))
 
 
 def words_to_segs(words: list[Word], low_conf: float, size: tuple[int, int] | None = None) -> list[dict]:

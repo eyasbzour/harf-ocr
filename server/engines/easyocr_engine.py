@@ -14,7 +14,7 @@ _lock = threading.Lock()
 
 def available() -> tuple[bool, str]:
     if not find_spec("easyocr"):  # looked up, not imported: listing the readers stays instant (it brings torch)
-        return False, msg("EasyOCR غير مثبت على الخادم (pip install easyocr)")
+        return False, msg("server.easyocrIsntInstalledServerPip")
     return True, ""
 
 
@@ -39,6 +39,6 @@ def run(img) -> list[Line]:
         reader = _get_reader()
         res = reader.readtext(np.array(img), detail=1, paragraph=False)
     except Exception as e:
-        raise EngineError(msg("تعذرت القراءة بـ EasyOCR: {error}", error=e)) from e
+        raise EngineError(msg("server.couldntReadEasyocr", error=e)) from e
     frags = [(box, text, float(conf)) for box, text, conf in res]
     return fragments_to_lines(frags)

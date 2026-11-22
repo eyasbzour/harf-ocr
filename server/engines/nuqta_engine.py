@@ -26,7 +26,7 @@ _lock = threading.Lock()
 
 def available() -> tuple[bool, str]:
     if not (find_spec("torch") and find_spec("transformers")):  # looked up, not imported: listing the readers stays instant
-        return False, msg("Nuqta غير مثبت على الخادم (pip install transformers accelerate)")
+        return False, msg("server.nuqtaIsntInstalledServerPip")
     return True, ""
 
 
@@ -90,7 +90,7 @@ def run(img, spot: bool = False) -> list[Line]:
         from . import paddle_engine  # the text lines' places on the page
 
         if not paddle_engine.available()[0]:
-            raise EngineError(msg("قراءة صفحة كاملة بـ Nuqta تحتاج PaddleOCR لتحديد أسطر النص"))
+            raise EngineError(msg("server.readingWholePageNuqtaNeeds"))
         import numpy as np
 
         frags = paddle_engine._fragments(paddle_engine._get().predict(np.array(img.convert("RGB"))[:, :, ::-1]))
@@ -106,4 +106,4 @@ def run(img, spot: bool = False) -> list[Line]:
     except EngineError:
         raise
     except Exception as e:
-        raise EngineError(msg("تعذرت القراءة بـ Nuqta: {error}", error=e)) from e
+        raise EngineError(msg("server.couldntReadNuqta", error=e)) from e

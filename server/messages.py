@@ -1,45 +1,70 @@
-"""Text in two languages. The Arabic text is the key, as in the browser (web/js/i18n.js).
+"""Text in every interface language, by name, from the same files as the browser (web/i18n/<code>.json, read by
+web/js/i18n.js too). Arabic is the source: the text a name falls back to.
 
-msg(): a message for the screen. It is the Arabic text, and also carries its key and values, so a reply can send
-{"error", "key", "args"} (payload) and the browser shows it in the chosen language (web/i18n/en.js has the English).
+msg(): a message for the screen. It is the Arabic text, and also carries its name and values, so a reply sends
+{"error", "key", "args"} (payload) and the browser shows it in the chosen language.
 
-doc(): text the readers write into the document: a note on an uncertain word, "[توقيع]" in place of a signature.
-It follows the page's language, not the interface: in_language() puts a left-to-right page's in English (DOC_EN).
+doc(): text the readers write into the document (doc.* names): a note on an uncertain word, "[توقيع]" in place of a
+signature. It follows the page's language, not the interface's: in_language() renders it for the page.
 """
 from __future__ import annotations
 
 import json
-import re
 import string
+from functools import lru_cache
 from pathlib import Path
 
-# ---- the interface languages: one file each, web/i18n/<code>.js, I18N.add("<code>", {name, dir}, {key: text})
-# (web/js/i18n.js). The server serves them as one script and takes the codes from here; the Windows program's
-# launcher reads its few words from them. Arabic is the source: the text in the code, and the fallback.
 LANG_DIR = Path(__file__).resolve().parent.parent / "web" / "i18n"
 SOURCE = "ar"
 
 
 def languages() -> list[str]:
-    return sorted(p.stem for p in LANG_DIR.glob("*.js"))
+    return sorted(p.stem for p in LANG_DIR.glob("*.json"))
 
 
+@lru_cache(maxsize=None)
 def language_file(code: str) -> tuple[dict, dict]:
-    """A language file's {name, dir} and its entries (the file is strict JSON inside I18N.add(...))."""
-    text = "\n".join(ln for ln in (LANG_DIR / f"{code}.js").read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("//"))
-    m = re.fullmatch(r'\s*I18N\.add\("(\w+)",\s*(\{.*?\}),\s*(\{.*\})\);\s*', text, re.S)
-    if not m or m.group(1) != code:
-        raise ValueError(f"web/i18n/{code}.js is not I18N.add(\"{code}\", {{name, dir}}, {{...}});")
-    return json.loads(m.group(2)), json.loads(m.group(3))
+    """A language's {name, dir} and its entries."""
+    data = json.loads((LANG_DIR / f"{code}.json").read_text(encoding="utf-8"))
+    return data.pop("_meta"), data
+
+
+def _plural(n) -> str:
+    """Enough of Intl.PluralRules for the forms the files use; "other" when a form is missing."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return "other"
+    return "zero" if n == 0 else "one" if n == 1 else "two" if n == 2 else "few" if 3 <= n % 100 <= 10 else \
+        "many" if 11 <= n % 100 <= 99 else "other"
+
+
+class _Format(string.Formatter):
+    """{x!l}: the value in lower case ("this signature")."""
+
+    def convert_field(self, value, conversion):
+        return str(value).lower() if conversion == "l" else super().convert_field(value, conversion)
+
+
+def render(lang: str, key: str, **args) -> str:
+    """The text of a name in lang (else Arabic), its values filled in, and in lang too when they are messages."""
+    entries = language_file(lang)[1] if lang in languages() else {}
+    v = entries.get(key, language_file(SOURCE)[1][key])
+    if isinstance(v, dict):
+        v = v.get(_plural(args.get("n"))) or v["other"]
+    if not args:
+        return v
+    return _Format().format(v, **{k: render(lang, x.key, **x.args) if isinstance(x, Msg) else str(_of(x))
+                                  for k, x in args.items()})
 
 
 class Msg(str):
-    """The Arabic text, with the template and values it was made from."""
+    """The Arabic text, with the name and values it was made from."""
     key: str
     args: dict
 
     def __new__(cls, key: str, **args):
-        self = super().__new__(cls, key.format(**{k: str(v) for k, v in args.items()}) if args else key)
+        self = super().__new__(cls, render(SOURCE, key, **args))
         self.key, self.args = key, args
         return self
 
@@ -49,7 +74,7 @@ def msg(key: str, **args) -> Msg:
 
 
 def doc(key: str, **args) -> Msg:
-    assert key in DOC_EN, key  # tests/test_i18n.py: every doc() text has its English
+    assert key.startswith("doc."), key
     return Msg(key, **args)
 
 
@@ -60,10 +85,11 @@ def _of(v):
     return v
 
 
-def _arg(v):
+def wire(v):
+    """A message as the browser reads it, {key, args} (I18N.message, I18N.t); other values as text."""
     v = _of(v)
     if isinstance(v, Msg):
-        return {"key": v.key, "args": {k: _arg(x) for k, x in v.args.items()}}
+        return {"key": v.key, "args": {k: wire(x) for k, x in v.args.items()}}
     return str(v)
 
 
@@ -71,55 +97,21 @@ def payload(m) -> dict:
     """{"error": the Arabic text, "key", "args"} for a reply; an exception's message when it has one."""
     m = _of(m)
     if isinstance(m, Msg):
-        return {"error": str(m), "key": m.key, "args": {k: _arg(x) for k, x in m.args.items()}}
+        return {"error": str(m), **wire(m)}
     return {"error": str(m)}
 
 
-# ---- text written into the document
-DOC_EN = {
-    "قراءة غير مؤكدة (درجة الثقة {conf}%)، قارن مع الصورة الأصلية":
-        "Uncertain reading (confidence {conf}%). Compare it with the original photo.",
-    "تأشيرة بخط اليد": "Handwritten note",
-    "توقيع": "Signature",
-    "ختم": "Stamp",
-    "[{label}]": "[{label}]",
-    " القراءة الآلية التقريبية: «{text}».": " The rough machine reading: \"{text}\".",
-    "{label} في الصورة لا تقرؤه القراءة الآلية بدقة.{guess} اكتب نصه هنا أو احذف هذا الموضع.":
-        "The machine reading can't read this {label!l} in the photo accurately.{guess} Type its text here or delete this spot.",
-    # the number check runs on Arabic pages only (engines/__init__.py), but its note is document text all the same
-    "رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة":
-        "A number Tesseract read that PaddleOCR missed. Check it in the photo.",
-    # Claude's (ai_engines.py): its own notes are written in Arabic, as its instructions ask
-    "غير مؤكد": "Uncertain",
-    "(موضع الملاحظة تقريبي) ": "(the note's place is approximate) ",
-    "ملاحظة": "Note",
-}
-
-
-class _Format(string.Formatter):
-    """{x!l}: the value in lower case ("this signature")."""
-
-    def convert_field(self, value, conversion):
-        return str(value).lower() if conversion == "l" else super().convert_field(value, conversion)
-
-
-def english(v) -> str:
-    """A doc() text in English; its values too."""
-    if not isinstance(v, Msg):
-        return str(v)
-    return _Format().format(DOC_EN[v.key], **{k: english(x) for k, x in v.args.items()})
-
-
 def in_language(blocks: list[dict], lang: str) -> list[dict]:
-    """The doc() text in the blocks (segments' text and notes, in paragraphs and table cells) in lang."""
-    if lang != "en":
+    """The doc() text in the blocks (segments' text and notes, in paragraphs and table cells) in lang. Arabic stays
+    as it is: the messages are Arabic already."""
+    if lang == SOURCE:
         return blocks
 
     def segs(ss):
         for sg in ss or []:
             for k in ("s", "note"):
                 if isinstance(sg.get(k), Msg):
-                    sg[k] = english(sg[k])
+                    sg[k] = render(lang, sg[k].key, **sg[k].args)
 
     for b in blocks:
         segs(b.get("segs"))

@@ -16,7 +16,7 @@ from messages import doc
 
 DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 NUM = re.compile(r"\d+")
-NOTE = doc("رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة")
+NOTE = doc("doc.numberTesseractReadPaddleocrMissed")
 
 
 def numbers(text: str) -> Counter:

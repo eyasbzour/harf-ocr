@@ -17,7 +17,7 @@ _lock = threading.Lock()
 
 def available() -> tuple[bool, str]:
     if not find_spec("paddleocr"):  # looked up, not imported: listing the readers stays instant; a broken install shows when reading
-        return False, msg("PaddleOCR غير مثبت على الخادم (pip install paddlepaddle paddleocr)")
+        return False, msg("server.paddleocrIsntInstalledServerPip")
     return True, ""
 
 
@@ -99,5 +99,5 @@ def run(img, lang: str = "ar") -> list[Line]:
         arr = np.array(img)[:, :, ::-1]  # RGB -> BGR
         result = ocr.predict(arr) if hasattr(ocr, "predict") else ocr.ocr(arr)
     except Exception as e:
-        raise EngineError(msg("تعذرت القراءة بـ PaddleOCR: {error}", error=e)) from e
+        raise EngineError(msg("server.couldntReadPaddleocr", error=e)) from e
     return fragments_to_lines(_fragments(result))

@@ -31,7 +31,7 @@ VERSION = (HERE / "VERSION").read_text(encoding="utf-8").strip() if (HERE / "VER
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "DocScan"
 # the server's modules, from here on (messages.py reads the language files for the launcher too)
 sys.path.insert(0, str(APP / "server"))
-from messages import SOURCE, language_file, languages  # noqa: E402
+from messages import SOURCE, language_file, languages, render  # noqa: E402
 
 
 def language() -> str:
@@ -51,16 +51,15 @@ def language() -> str:
 
 
 LANG = language()
-LANG_META, WORDS = language_file(LANG)
+LANG_META = language_file(LANG)[0]
 
 
-def tr(text: str) -> str:
+def tr(key: str) -> str:
     """What shows before the page (the window title, the splash, two message boxes) in the interface language."""
-    v = WORDS.get(text)
-    return v if isinstance(v, str) else text
+    return render(LANG, key)
 
 
-TITLE = tr("حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية")
+TITLE = tr("ui.titleFull")
 # the same port every start, so the page's address stays the same: its settings (localStorage: theme, name, keys)
 # belong to the address, port included, and a new port each start forgot them. If another program holds it, a free
 # one is picked once and remembered (LOCAL\port), so the settings still last from then on.
@@ -100,7 +99,7 @@ p{margin:0 0 18px;color:var(--muted);font-size:13px}
 <h1>$TITLE</h1><p>$STARTING</p>
 <div class="bar" role="progressbar" aria-label="$BUSY"><b></b></div></main></body></html>"""
 SPLASH = (SPLASH.replace("$LANG", LANG).replace("$DIR", LANG_META["dir"]).replace("$TITLE", TITLE)
-          .replace("$STARTING", tr("جارٍ تشغيل البرنامج…")).replace("$BUSY", tr("جارٍ التشغيل")))
+          .replace("$STARTING", tr("launcher.startingProgram")).replace("$BUSY", tr("launcher.starting")))
 
 
 def message(text: str, error: bool = False) -> None:
@@ -201,7 +200,7 @@ def main() -> None:
     # one copy at a time: a second start would read the same drafts from two places
     ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\DocScan.single")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        message(tr("البرنامج مفتوح بالفعل."))
+        message(tr("launcher.programAlreadyOpen"))
         return
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Eyasbzour.DocScan")  # taskbar: our icon and name
     (LOCAL / "logs").mkdir(parents=True, exist_ok=True)
@@ -245,7 +244,7 @@ def main() -> None:
             window.load_url(f"http://127.0.0.1:{port}/")
         except Exception:
             traceback.print_exc()
-            message(tr("تعذر تشغيل البرنامج. التفاصيل في:") + "\n" + str(LOCAL / "logs" / "docscan.log"), error=True)
+            message(tr("launcher.programCouldntStartDetails") + "\n" + str(LOCAL / "logs" / "docscan.log"), error=True)
             window.destroy()
             return
         # PaddleOCR, the default reader, takes seconds to load: do it while the user picks a photo, once the page

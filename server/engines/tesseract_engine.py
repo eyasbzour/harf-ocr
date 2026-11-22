@@ -46,14 +46,14 @@ def _dir(model: str) -> str:
 
 def available(model: str, langs: str = LANGS) -> tuple[bool, str]:
     if not shutil.which("tesseract"):
-        return False, msg("Tesseract غير مثبت على الخادم")
+        return False, msg("server.tesseractIsntInstalledServer")
     dir_ = _dir(model)
     if dir_ and not os.path.isdir(dir_):
-        return False, msg("ملفات النموذج غير موجودة على الخادم: {folder}", folder=dir_)
+        return False, msg("server.modelFilesArentServer", folder=dir_)
     need = set(langs.split("+"))
     have = _langs_in(dir_)
     if not need <= have:
-        return False, msg("اللغة العربية غير مثبتة لهذا النموذج: {missing}", missing=", ".join(sorted(need - have)))
+        return False, msg("server.arabicIsntInstalledModel", missing=", ".join(sorted(need - have)))
     return True, ""
 
 
@@ -88,7 +88,7 @@ def _read(img, langs: str, dir_: str, psm: int) -> list[Line]:
     try:
         d = pytesseract.image_to_data(img, lang=langs, config=config, output_type=pytesseract.Output.DICT, timeout=180)
     except RuntimeError as e:  # timeout
-        raise EngineError(msg("انتهت مهلة القراءة بـ Tesseract")) from e
+        raise EngineError(msg("server.readingTesseractTimedOut")) from e
 
     lines: dict = {}
     order = []

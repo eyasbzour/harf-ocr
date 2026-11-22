@@ -1,16 +1,17 @@
-// The interface language. The text in the code is Arabic, and it is also the key: tx('حذف الصفحة {page}؟', { page: 3 })
-// looks it up in the chosen language and falls back to the Arabic.
+// The interface language. Text is looked up by name: tx('app.deletePage', { page: 3 }) is the chosen language's
+// "app.deletePage" with {page} filled in, else the Arabic one (the source), else the name itself.
 //
-// A language is one file, web/i18n/<code>.js: I18N.add('<code>', { name, dir }, { key: text, ... }). The server
-// serves them all as /i18n/all.js (server/main.py), so a new file is all a new language needs. An entry can be
-// { one, other } for plurals (Intl.PluralRules, by vars.n), with zero where it reads better than "0 ...".
-// web/i18n/ar.js holds only Arabic's own plural forms. web/js/i18n.test.js checks every language has every key.
+// A language is one file, web/i18n/<code>.json: { "_meta": { "name", "dir" }, "<name>": "text", ... }. The server
+// serves them all as /i18n/all.js (server/main.py), so adding a language is adding its file; web/js/i18n.test.js
+// checks it has every name. A plural is { one, other, ... } by Intl.PluralRules on vars.n, with zero where it reads
+// better than "0 ...".
 //
-// Loaded in <head>, like theme.js; the language files right after it set the page's lang and dir before it is drawn.
-// I18N.apply() translates the static page once, so changing the language reloads the page.
+// The static pages carry names, not text: data-i18n="<name>" for an element's text, data-i18n-<attribute>="<name>"
+// for title, aria-label, placeholder, alt and data-short. I18N.apply() fills them in once, before the app's scripts,
+// so changing the language reloads the page.
 (function (root) {
   var dicts = {}, metas = {};
-  var SOURCE = 'ar';  // the language the code is written in
+  var SOURCE = 'ar';
   function stored() {
     try { return localStorage.getItem('ds.lang'); } catch (e) { return null; }  // storage blocked
   }
@@ -23,7 +24,6 @@
     var l = current();
     try { return (rules[l] = rules[l] || new Intl.PluralRules(l)).select(n); } catch (e) { return n === 1 ? 'one' : 'other'; }
   }
-  var norm = function (s) { return String(s).replace(/\s+/g, ' ').trim(); };
   // {name} -> its value; a value that is itself a server message ({ key, args }) is put in the language too
   function fill(s, vars) {
     return vars ? s.replace(/\{(\w+)\}/g, function (m, k) {
@@ -32,46 +32,38 @@
       return x && typeof x === 'object' && x.key ? t(x.key, x.args) : x;
     }) : s;
   }
-  function t(text, vars) {
-    var d = dicts[current()];
-    var v = d ? d[text] : null;
-    // an explicit zero form ("No pages") where the language has none of its own (English 0 is "other")
-    if (v && typeof v === 'object') v = (vars && vars.n === 0 && v.zero) || v[plural(vars && vars.n)] || v.other;
-    return fill(typeof v === 'string' ? v : String(text), vars);
+  function lookup(key) {
+    var d = dicts[current()], v = d && d[key];
+    if (v == null && dicts[SOURCE]) v = dicts[SOURCE][key];
+    return v;
   }
-  // the message in a server reply, { error, key, args } (server/messages.py): its key in the chosen language, else its
-  // text; also a plain text the server sent
+  function t(key, vars) {
+    var v = lookup(key);
+    if (v && typeof v === 'object') v = (vars && vars.n === 0 && v.zero) || v[plural(vars && vars.n)] || v.other;
+    return fill(typeof v === 'string' ? v : String(key), vars);
+  }
+  // a server reply's message, { error, key, args } (server/messages.py), in the chosen language; a label the server
+  // sends is a message too ({ key, args }), or plain text (a reader's own name, a template's typed name)
   function message(data) {
     if (!data) return '';
-    if (typeof data === 'string') return t(data);
+    if (typeof data === 'string') return data;
     if (data.key) return t(data.key, data.args);
     var m = data.error || data.detail;
-    return typeof m === 'string' ? t(m) : '';
+    return typeof m === 'string' ? m : '';
   }
 
-  // the static page, once: text, and the attributes people read; translate="no" (language names) stays as written
   var ATTRS = ['title', 'aria-label', 'placeholder', 'alt', 'data-short'];
   function apply(node) {
-    var d = dicts[current()];
-    if (!d || current() === SOURCE) return;  // the page is written in it
-    var walk = node.ownerDocument.createTreeWalker(node, 4 /* text */), n, k;
-    while ((n = walk.nextNode())) {
-      if (/^(SCRIPT|STYLE)$/.test(n.parentNode.nodeName) || n.parentNode.closest('[translate="no"]')) continue;
-      k = norm(n.nodeValue);
-      if (k && typeof d[k] === 'string') n.nodeValue = n.nodeValue.replace(/\S[\s\S]*\S|\S/, d[k]);
-    }
-    var els = node.querySelectorAll('[' + ATTRS.join('],[') + ']');
-    for (var i = 0; i < els.length; i++) {
-      if (els[i].closest('[translate="no"]')) continue;
-      for (var j = 0; j < ATTRS.length; j++) {
-        var a = els[i].getAttribute(ATTRS[j]);
-        if (a && typeof d[norm(a)] === 'string') els[i].setAttribute(ATTRS[j], d[norm(a)]);
-      }
+    var els = node.querySelectorAll('[data-i18n]'), i, j;
+    for (i = 0; i < els.length; i++) els[i].textContent = t(els[i].getAttribute('data-i18n'));
+    for (j = 0; j < ATTRS.length; j++) {
+      els = node.querySelectorAll('[data-i18n-' + ATTRS[j] + ']');
+      for (i = 0; i < els.length; i++) els[i].setAttribute(ATTRS[j], t(els[i].getAttribute('data-i18n-' + ATTRS[j])));
     }
   }
 
   var I18N = {
-    t: t, message: message, apply: apply, plural: plural, norm: norm,
+    t: t, message: message, apply: apply, plural: plural,
     lang: current,
     dir: function () { return (metas[current()] || { dir: 'rtl' }).dir; },
     // { code, name, dir } for each language, the source first: names in their own language
@@ -79,12 +71,15 @@
       return Object.keys(metas).sort(function (a, b) { return (a !== SOURCE) - (b !== SOURCE) || (a < b ? -1 : 1); })
         .map(function (c) { return { code: c, name: metas[c].name, dir: metas[c].dir }; });
     },
-    add: function (code, meta, entries) {
-      metas[code] = meta;
+    // a language file's content: { _meta: { name, dir }, name: text, ... }
+    add: function (code, file) {
+      var entries = {};
+      for (var k in file) if (k !== '_meta') entries[k] = file[k];
+      metas[code] = file._meta;
       dicts[code] = entries;
       if (code === current() && root.document) {
         root.document.documentElement.lang = code;
-        root.document.documentElement.dir = meta.dir;
+        root.document.documentElement.dir = file._meta.dir;
       }
     },
     dict: function (code) { return dicts[code]; },
