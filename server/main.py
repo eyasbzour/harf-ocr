@@ -17,13 +17,16 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import convert
 import engines
+from messages import LANG_DIR, Msg, languages, msg, payload
 import parts
 import remote
 
@@ -80,8 +83,9 @@ async def password_gate(request: Request, call_next):
 
 # ------------------------------------------------------------------ use on phone (remote.py)
 # what a phone may reach before signing in: the sign-in page and what it draws with
-PHONE_OPEN = ("/phone.html", "/api/remote/login", "/css/app.css", "/js/theme.js", "/vendor/icons.svg")
-PC_ONLY = ("/api/remote", "/api/update", "/api/parts", "/api/restart")  # the program's own controls
+PHONE_OPEN = ("/phone.html", "/api/remote/login", "/css/app.css", "/js/theme.js", "/vendor/icons.svg",
+              "/js/lang-default.js", "/js/i18n.js", "/i18n/all.js")
+PC_ONLY = ("/api/remote", "/api/update", "/api/parts", "/api/restart", "/api/lang")  # the program's own controls
 
 
 @app.middleware("http")
@@ -92,16 +96,29 @@ async def phone_gate(request: Request, call_next):
     if path in PHONE_OPEN:
         return await call_next(request)
     if path.startswith(PC_ONLY):
-        return JSONResponse({"error": "هذا متاح على الحاسوب فقط"}, status_code=403)
+        return refuse(msg("هذا متاح على الحاسوب فقط"), 403)
     if remote.signed_in(request.cookies.get(remote.COOKIE)):
         return await call_next(request)
     if path.startswith("/api/"):
-        return JSONResponse({"error": "انتهت الجلسة. افتح الرابط من جديد وسجّل الدخول."}, status_code=401)
+        return refuse(msg("انتهت الجلسة. افتح الرابط من جديد وسجّل الدخول."), 401)
     return RedirectResponse("/phone.html", status_code=303)
 
 
-def _err(status: int, msg: str):
-    raise HTTPException(status_code=status, detail=msg)
+def refuse(m, status: int, **extra) -> JSONResponse:
+    """A refusal or error reply: {"error", "key", "args"} (messages.py payload), so the page shows it in its language."""
+    return JSONResponse({**payload(m), **extra}, status_code=status)
+
+
+def _err(status: int, m: Msg):
+    raise HTTPException(status_code=status, detail=m)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    """An _err() refusal goes out like refuse(); FastAPI's own (404 for an unknown path) as before."""
+    if isinstance(exc.detail, Msg):
+        return refuse(exc.detail, exc.status_code)
+    return await http_exception_handler(request, exc)
 
 
 # ------------------------------------------------------------------ the Windows program: updates
@@ -125,17 +142,17 @@ def update_check():
     try:
         return updater.check_now()
     except Exception:
-        return JSONResponse({"error": "تعذر الاتصال بـ GitHub. تأكد من الاتصال بالإنترنت."}, status_code=502)
+        return refuse(msg("تعذر الاتصال بـ GitHub. تأكد من الاتصال بالإنترنت."), 502)
 
 
 @app.post("/api/update/install")
 async def update_install():
     if not DESKTOP:
-        return JSONResponse({"error": "التحديث متاح في برنامج ويندوز فقط"}, status_code=404)
+        return refuse(msg("التحديث متاح في برنامج ويندوز فقط"), 404)
     try:
         await run_in_threadpool(updater.install, QUIT_APP[0])
     except Exception as e:
-        return JSONResponse({"error": f"تعذر التحديث: {e}"}, status_code=502)
+        return refuse(msg("تعذر التحديث: {error}", error=e), 502)
     return {"ok": True}
 
 
@@ -146,7 +163,7 @@ RESTART_APP = [None]  # desktop/app.py sets it: close, and open again
 @app.post("/api/restart")
 def restart():
     if not RESTART_APP[0]:
-        return JSONResponse({"error": "إعادة التشغيل متاحة في برنامج ويندوز فقط"}, status_code=404)
+        return refuse(msg("إعادة التشغيل متاحة في برنامج ويندوز فقط"), 404)
     RESTART_APP[0]()
     return {"ok": True}
 
@@ -165,11 +182,11 @@ def parts_stop():
 @app.post("/api/parts/install")
 def parts_install():
     if not parts.offered():
-        return JSONResponse({"error": "تنزيل القرّاء متاح في برنامج ويندوز فقط"}, status_code=404)
+        return refuse(msg("تنزيل القرّاء متاح في برنامج ويندوز فقط"), 404)
     try:
         parts.start()
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=507)
+        return refuse(e, 507)
     return parts.status()
 
 
@@ -177,7 +194,7 @@ def parts_install():
 @app.get("/api/remote")
 def remote_status():
     if not remote.offered():
-        return JSONResponse({"error": "الاستخدام على الهاتف متاح في برنامج ويندوز فقط"}, status_code=404)
+        return refuse(msg("الاستخدام على الهاتف متاح في برنامج ويندوز فقط"), 404)
     st = remote.status()
     if st["state"] == "on":
         import segno
@@ -191,7 +208,7 @@ def remote_status():
 @app.post("/api/remote/start")
 def remote_start():
     if not remote.offered():
-        return JSONResponse({"error": "الاستخدام على الهاتف متاح في برنامج ويندوز فقط"}, status_code=404)
+        return refuse(msg("الاستخدام على الهاتف متاح في برنامج ويندوز فقط"), 404)
     remote.start(app)
     return remote_status()
 
@@ -211,9 +228,9 @@ async def remote_login(request: Request):
     try:
         token = remote.login(str(body.get("password", "")))
     except PermissionError:
-        return JSONResponse({"error": "محاولات كثيرة. انتظر دقيقة ثم حاول من جديد."}, status_code=429)
+        return refuse(msg("محاولات كثيرة. انتظر دقيقة ثم حاول من جديد."), 429)
     if not token:
-        return JSONResponse({"error": "كلمة المرور غير صحيحة."}, status_code=401)
+        return refuse(msg("كلمة المرور غير صحيحة."), 401)
     res = JSONResponse({"ok": True})
     # the phone reaches it over https (the tunnel), so the cookie is Secure; it lasts while the browser is open
     res.set_cookie(remote.COOKIE, token, httponly=True, secure=True, samesite="lax", path="/")
@@ -230,8 +247,8 @@ def list_engines(request: Request):
         # Nuqta and EasyOCR come as one download in the Windows program (parts.py)
         installable = not ok and e["id"] in ("nuqta", "easyocr") and parts.offered() and not remote.is_remote(request.scope)
         if installable and parts.status()["state"] == "restart":
-            installable, why = False, "اكتمل التنزيل. أعد تشغيل البرنامج ليعمل هذا القارئ."
-        out.append({**e, "available": ok, "reason": why, "serverKey": server_key, "installable": installable})
+            installable, why = False, msg("اكتمل التنزيل. أعد تشغيل البرنامج ليعمل هذا القارئ.")
+        out.append({**e, "available": ok, "reason": payload(why) if why else None, "serverKey": server_key, "installable": installable})
     return {"engines": out, "claudeModels": CLAUDE_MODELS, "lowConfidence": LOW_CONF}
 
 
@@ -262,9 +279,9 @@ async def ocr(
                 langs=langs if langs in ("ara", "ara+eng") else "ara+eng",
                 direction=direction if direction in ("auto", "rtl", "ltr") else "auto")
         except engines.EngineError as e:
-            return JSONResponse({"error": str(e)}, status_code=422)
+            return refuse(e, 422)
         except Exception as e:  # never echo the key or the request body
-            return JSONResponse({"error": f"خطأ غير متوقع أثناء القراءة: {type(e).__name__}"}, status_code=500)
+            return refuse(msg("خطأ غير متوقع أثناء القراءة: {error}", error=type(e).__name__), 500)
     return {"blocks": blocks, "engine": engine, "seconds": round(time.time() - t0, 1)}
 
 
@@ -285,7 +302,7 @@ async def ocr_spots(
         spots = [[float(v) for v in b][:4] for b in json.loads(boxes)][:80]
         assert spots and all(len(b) == 4 and 0 <= b[0] < b[2] <= 1 and 0 <= b[1] < b[3] <= 1 for b in spots)
     except Exception:
-        return JSONResponse({"error": "مواضع غير صالحة"}, status_code=422)
+        return refuse(msg("مواضع غير صالحة"), 422)
     data = _image_path(draft_id, image).read_bytes()
     t0 = time.time()
     async with OCR_SLOTS:
@@ -295,23 +312,23 @@ async def ocr_spots(
                 cleanup=cleanup if cleanup in ("none", "clean", "bw") else "clean", api_key=api_key or None,
                 model=model or None, low_conf=LOW_CONF, langs=langs if langs in ("ara", "ara+eng") else "ara+eng")
         except engines.EngineError as e:
-            return JSONResponse({"error": str(e)}, status_code=422)
+            return refuse(e, 422)
         except Exception as e:  # never echo the key or the request body
-            return JSONResponse({"error": f"خطأ غير متوقع أثناء القراءة: {type(e).__name__}"}, status_code=500)
+            return refuse(msg("خطأ غير متوقع أثناء القراءة: {error}", error=type(e).__name__), 500)
     return {"results": results, "engine": engine, "seconds": round(time.time() - t0, 1)}
 
 
 # ------------------------------------------------------------------ drafts
 def _draft_dir(draft_id: str) -> Path:
     if not ID_RE.match(draft_id or ""):
-        _err(400, "معرف مسودة غير صالح")
+        _err(400, msg("معرف مسودة غير صالح"))
     return DRAFTS / draft_id
 
 
 def _load(draft_id: str) -> dict:
     f = _draft_dir(draft_id) / "draft.json"
     if not f.exists():
-        _err(404, "المسودة غير موجودة")
+        _err(404, msg("المسودة غير موجودة"))
     return json.loads(f.read_text(encoding="utf8"))
 
 
@@ -325,10 +342,10 @@ def _save(d: dict) -> None:
 
 def _image_path(draft_id: str, name: str) -> Path:
     if not IMG_RE.match(name or ""):
-        _err(400, "اسم صورة غير صالح")
+        _err(400, msg("اسم صورة غير صالح"))
     p = _draft_dir(draft_id) / "images" / name
     if not p.exists():
-        _err(404, "الصورة غير موجودة")
+        _err(404, msg("الصورة غير موجودة"))
     return p
 
 
@@ -351,7 +368,7 @@ async def create_draft(request: Request):
     body = await request.json()
     now = time.time()
     tpls = list_templates()["templates"]  # sorted: first one is the default
-    d = {"id": uuid.uuid4().hex, "name": str(body.get("name") or "مسودة جديدة")[:200],
+    d = {"id": uuid.uuid4().hex, "name": str(body.get("name") or msg("مسودة جديدة"))[:200],
          "owner": str(body.get("owner") or "")[:100], "created": now, "updated": now, "version": 1,
          "template": body.get("template") or (tpls[0]["id"] if tpls else ""), "date": body.get("date") or "", "pages": []}
     _save(d)
@@ -368,7 +385,7 @@ async def put_draft(draft_id: str, request: Request):
     body = await request.json()
     cur = _load(draft_id)
     if int(body.get("version", 0)) != int(cur.get("version", 0)):
-        return JSONResponse({"error": "عدّل شخص آخر هذه المسودة. أعد فتحها قبل الحفظ.", "current": cur}, status_code=409)
+        return refuse(msg("عدّل شخص آخر هذه المسودة. أعد فتحها قبل الحفظ."), 409, current=cur)
     keep = {"id": cur["id"], "created": cur.get("created")}
     d = {**body, **keep, "updated": time.time(), "version": int(cur.get("version", 0)) + 1}
     _save(d)
@@ -387,10 +404,10 @@ def delete_draft(draft_id: str):
 async def upload_image(draft_id: str, file: UploadFile = File(...)):
     dd = _draft_dir(draft_id)
     if not (dd / "draft.json").exists():
-        _err(404, "المسودة غير موجودة")
+        _err(404, msg("المسودة غير موجودة"))
     raw = await file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD:
-        _err(413, "الصورة كبيرة جداً (الحد 25 ميغابايت)")
+        _err(413, msg("الصورة كبيرة جداً (الحد 25 ميغابايت)"))
     try:
         img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw)))
         if img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info):
@@ -402,7 +419,7 @@ async def upload_image(draft_id: str, file: UploadFile = File(...)):
         else:
             img = img.convert("RGB")
     except Exception:
-        _err(400, "الملف ليس صورة صالحة")
+        _err(400, msg("الملف ليس صورة صالحة"))
     img.thumbnail((3200, 3200))
     name = uuid.uuid4().hex + ".jpg"
     (dd / "images").mkdir(exist_ok=True)
@@ -419,7 +436,7 @@ def get_image(draft_id: str, name: str):
 # ------------------------------------------------------------------ header templates
 def _check_admin(token: str):
     if ADMIN_TOKEN and not secrets.compare_digest(token or "", ADMIN_TOKEN):
-        _err(403, "رمز المسؤول غير صحيح")
+        _err(403, msg("رمز المسؤول غير صحيح"))
 
 
 @app.get("/api/templates")
@@ -442,10 +459,10 @@ def list_templates():
 @app.get("/api/templates/{tpl_id}/file")
 def template_file(tpl_id: str):
     if not TPL_RE.match(tpl_id):
-        _err(400, "معرف قالب غير صالح")
+        _err(400, msg("معرف قالب غير صالح"))
     f = TEMPLATES / f"{tpl_id}.docx"
     if not f.exists():
-        _err(404, "القالب غير موجود")
+        _err(404, msg("القالب غير موجود"))
     return FileResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
@@ -454,14 +471,14 @@ async def add_template(name: str = Form(...), file: UploadFile = File(...), admi
     _check_admin(admin_token)
     raw = await file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD or not raw.startswith(b"PK"):
-        _err(400, "الملف ليس ملف Word (.docx) صالحاً")
+        _err(400, msg("الملف ليس ملف Word (.docx) صالحاً"))
     import zipfile
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             if "word/document.xml" not in z.namelist():
                 raise ValueError
     except Exception:
-        _err(400, "الملف ليس ملف Word (.docx) صالحاً")
+        _err(400, msg("الملف ليس ملف Word (.docx) صالحاً"))
     tid = "t-" + uuid.uuid4().hex[:10]
     (TEMPLATES / f"{tid}.docx").write_bytes(raw)
     (TEMPLATES / f"{tid}.json").write_text(json.dumps({"name": name[:120]}, ensure_ascii=False), encoding="utf8")
@@ -472,9 +489,9 @@ async def add_template(name: str = Form(...), file: UploadFile = File(...), admi
 def delete_template(tpl_id: str, admin_token: str = ""):
     _check_admin(admin_token)
     if not TPL_RE.match(tpl_id):
-        _err(400, "معرف قالب غير صالح")
+        _err(400, msg("معرف قالب غير صالح"))
     if tpl_id == "plain":  # ships with the program and the server image; the page offers no delete for it
-        _err(400, "القالب المدمج لا يُحذف")
+        _err(400, msg("القالب المدمج لا يُحذف"))
     for ext in (".docx", ".json"):
         p = TEMPLATES / f"{tpl_id}{ext}"
         if p.exists():
@@ -493,16 +510,46 @@ def formats():
 async def convert_doc(file: UploadFile = File(...), format: str = Form("pdf"), name: str = Form("document")):
     raw = await file.read(MAX_UPLOAD * 2 + 1)
     if len(raw) > MAX_UPLOAD * 2 or not raw.startswith(b"PK"):
-        _err(400, "ملف Word غير صالح")
+        _err(400, msg("ملف Word غير صالح"))
     async with CONVERT_SLOTS:
         try:
             data, filename, mime = await run_in_threadpool(convert.convert, raw, format, name)
         except convert.ConvertError as e:
-            return JSONResponse({"error": str(e)}, status_code=422)
+            return refuse(e, 422)
     from urllib.parse import quote
     return Response(data, media_type=mime, headers={
         "Content-Disposition": f"attachment; filename=\"document.{filename.rsplit('.', 1)[-1]}\"; filename*=UTF-8''{quote(filename)}"})
 
 
+@app.post("/api/lang")
+async def set_lang(request: Request):
+    """The Windows program: the language picked in Settings, for what shows before the page next time (the splash,
+    the window title, the web engine's own words). desktop/app.py language() reads the file it names."""
+    if not DESKTOP:
+        return refuse(msg("هذا متاح في برنامج ويندوز فقط"), 404)
+    lang = (await request.json()).get("lang")
+    if lang not in languages():
+        _err(400, msg("لغة غير معروفة"))
+    Path(os.environ["DOCSCAN_LANG_FILE"]).write_text(lang, encoding="utf-8")
+    os.environ["DOCSCAN_LANG"] = lang  # /js/lang-default.js from now on
+    return {"lang": lang}
+
+
 # ------------------------------------------------------------------ web app
+@app.get("/js/lang-default.js")
+def lang_default():
+    """The interface language until the user picks one (web/js/i18n.js): DOCSCAN_LANG, which the Windows program
+    sets from the language its installer ran in (desktop/app.py), or an office server's admin sets. Arabic if unset."""
+    lang = os.environ.get("DOCSCAN_LANG", "")
+    body = f"window.HARF_LANG_DEFAULT = {json.dumps(lang)};\n" if lang in languages() else ""
+    return Response(body, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/i18n/all.js")
+def all_languages():
+    """Every language file (web/i18n/*.js) as one script, so adding a language is adding its file."""
+    body = "\n".join((LANG_DIR / f"{code}.js").read_text(encoding="utf-8") for code in languages())
+    return Response(body, media_type="text/javascript", headers={"Cache-Control": "no-cache"})
+
+
 app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

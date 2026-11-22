@@ -12,6 +12,7 @@ import re
 from importlib.util import find_spec
 
 from .common import EngineError, Word, low_note, to_jpeg
+from messages import doc, msg
 
 MARK = re.compile(r"\[\[(.*?)\|\|(.*?)\]\]", re.S)
 TYPE_MAP = {"heading": "h", "paragraph": "p", "bullet": "li", "center": "c", "table": "table",
@@ -49,7 +50,7 @@ def _text_to_segs(text: str) -> list[dict]:
     for m in MARK.finditer(text or ""):
         if m.start() > pos:
             segs.append({"s": text[pos:m.start()]})
-        segs.append({"s": m.group(1), "note": m.group(2).strip() or "غير مؤكد"})
+        segs.append({"s": m.group(1), "note": m.group(2).strip() or doc("غير مؤكد")})
         pos = m.end()
     if pos < len(text or ""):
         segs.append({"s": text[pos:]})
@@ -89,24 +90,24 @@ def _attach_note(blocks: list[dict], anchor: str, note: str) -> None:
     for segs in seg_lists():
         for sg in segs:
             if sg["s"].strip():
-                prefix = "(موضع الملاحظة تقريبي) "
+                prefix = doc("(موضع الملاحظة تقريبي) ")
                 if sg.get("note"):
                     sg["note"] += "\n" + prefix + note
                 else:
                     sg["note"] = prefix + note
                 return
-    blocks.append({"type": "p", "bold": False, "segs": [{"s": "ملاحظة", "note": note}]})
+    blocks.append({"type": "p", "bold": False, "segs": [{"s": doc("ملاحظة"), "note": note}]})
 
 
 def parse_claude_json(raw: str) -> list[dict]:
     s = raw.strip()
     a, b = s.find("{"), s.rfind("}")
     if a < 0 or b < 0:
-        raise EngineError("لم يرجع Claude نتيجة قابلة للقراءة")
+        raise EngineError(msg("لم يرجع Claude نتيجة قابلة للقراءة"))
     try:
         data = json.loads(s[a:b + 1])
     except json.JSONDecodeError as e:
-        raise EngineError("لم يرجع Claude نتيجة قابلة للقراءة (JSON)") from e
+        raise EngineError(msg("لم يرجع Claude نتيجة قابلة للقراءة (JSON)")) from e
     blocks = []
     for bk in data.get("blocks", []):
         t = TYPE_MAP.get(str(bk.get("type", "paragraph")).lower(), "p")
@@ -126,7 +127,7 @@ def parse_claude_json(raw: str) -> list[dict]:
 
 def claude_available() -> tuple[bool, str]:
     if not find_spec("anthropic"):  # looked up, not imported: listing the readers stays instant
-        return False, "مكتبة anthropic غير مثبتة على الخادم"
+        return False, msg("مكتبة anthropic غير مثبتة على الخادم")
     return True, ""
 
 
@@ -135,11 +136,11 @@ def run_claude(img, api_key: str | None, model: str, skip_letterhead: bool) -> l
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        raise EngineError("أدخل مفتاح Claude API في الإعدادات")
+        raise EngineError(msg("أدخل مفتاح Claude API في الإعدادات"))
     data = base64.b64encode(to_jpeg(img, 2000)).decode()
     client = anthropic.Anthropic(api_key=key, timeout=300, max_retries=2)
     try:
-        msg = client.messages.create(
+        reply = client.messages.create(
             model=model or "claude-sonnet-5-5",
             max_tokens=16000,
             messages=[{"role": "user", "content": [
@@ -148,21 +149,21 @@ def run_claude(img, api_key: str | None, model: str, skip_letterhead: bool) -> l
             ]}],
         )
     except anthropic.AuthenticationError as e:
-        raise EngineError("مفتاح Claude غير صالح") from e
+        raise EngineError(msg("مفتاح Claude غير صالح")) from e
     except anthropic.APIStatusError as e:
-        raise EngineError(f"خطأ من Claude ({e.status_code}): {getattr(e, 'message', e)}") from e
+        raise EngineError(msg("خطأ من Claude ({status}): {error}", status=e.status_code, error=getattr(e, "message", e))) from e
     except anthropic.APIConnectionError as e:
-        raise EngineError("تعذر الاتصال بخدمة Claude من الخادم") from e
-    raw = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
-    if msg.stop_reason == "max_tokens":
-        raise EngineError("الصفحة طويلة جداً لقراءتها دفعة واحدة")
+        raise EngineError(msg("تعذر الاتصال بخدمة Claude من الخادم")) from e
+    raw = "".join(getattr(b, "text", "") for b in reply.content if getattr(b, "type", "") == "text")
+    if reply.stop_reason == "max_tokens":
+        raise EngineError(msg("الصفحة طويلة جداً لقراءتها دفعة واحدة"))
     return parse_claude_json(raw)
 
 
 # ---------------------------------------------------------------- Google Cloud Vision
 def google_available() -> tuple[bool, str]:
     if not find_spec("httpx"):
-        return False, "مكتبة httpx غير مثبتة على الخادم"
+        return False, msg("مكتبة httpx غير مثبتة على الخادم")
     return True, ""
 
 
@@ -171,7 +172,7 @@ def run_google(img, api_key: str | None, low_conf: float) -> list[dict]:
 
     key = api_key or os.environ.get("GOOGLE_VISION_API_KEY")
     if not key:
-        raise EngineError("أدخل مفتاح Google Vision في الإعدادات")
+        raise EngineError(msg("أدخل مفتاح Google Vision في الإعدادات"))
     body = {"requests": [{
         "image": {"content": base64.b64encode(to_jpeg(img, 2400, 92)).decode()},
         "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
@@ -180,14 +181,14 @@ def run_google(img, api_key: str | None, low_conf: float) -> list[dict]:
     try:
         r = httpx.post("https://vision.googleapis.com/v1/images:annotate", params={"key": key}, json=body, timeout=120)
     except httpx.HTTPError as e:
-        raise EngineError("تعذر الاتصال بخدمة Google Vision من الخادم") from e
+        raise EngineError(msg("تعذر الاتصال بخدمة Google Vision من الخادم")) from e
     data = r.json() if r.content else {}
     if r.status_code != 200 or "error" in data:
-        msg = (data.get("error") or {}).get("message") or r.text[:200]
-        raise EngineError(f"خطأ من Google Vision: {msg}")
+        detail = (data.get("error") or {}).get("message") or r.text[:200]
+        raise EngineError(msg("خطأ من Google Vision: {error}", error=detail))
     res = (data.get("responses") or [{}])[0]
     if "error" in res:
-        raise EngineError(f"خطأ من Google Vision: {res['error'].get('message')}")
+        raise EngineError(msg("خطأ من Google Vision: {error}", error=res["error"].get("message")))
     pages = (res.get("fullTextAnnotation") or {}).get("pages") or []
     blocks = []
     for page in pages:

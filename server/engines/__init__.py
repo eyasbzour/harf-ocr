@@ -12,6 +12,7 @@ from .lists import mark_list_items
 from .marks import split_marks
 from .numbers import check_numbers
 from .tables import find_tables
+from messages import in_language, msg
 
 # EasyOCR and PaddleOCR score their own confidence lower than Tesseract does,
 # so they get their own threshold for flagging.
@@ -22,15 +23,15 @@ ENGINES = [
     # reads tables best. Known weakness (test pages): it kept 18/34 numbers, against 30 for Tesseract "best" and 33
     # for EasyOCR, because its Arabic model drops Western digits inside Arabic lines ("م ض / 245 / 2026") at high
     # confidence, so they are not flagged.
-    {"id": "paddle", "label": "PaddleOCR (موصى به)", "group": "free", "key": None},
+    {"id": "paddle", "label": msg("PaddleOCR (موصى به)"), "group": "free", "key": None},
     # the most accurate for Arabic, also for numbers and some handwriting, but about a minute a page on a CPU:
     # the default second opinion for flagged words and paragraphs (nuqta_engine.py)
-    {"id": "nuqta", "label": "Nuqta (الأدق للعربية، أبطأ)", "group": "free", "key": None},
-    {"id": "tess-best", "label": "Tesseract (أدق)", "group": "free", "key": None},
+    {"id": "nuqta", "label": msg("Nuqta (الأدق للعربية، أبطأ)"), "group": "free", "key": None},
+    {"id": "tess-best", "label": msg("Tesseract (أدق)"), "group": "free", "key": None},
     {"id": "easyocr", "label": "EasyOCR", "group": "free", "key": None},
-    {"id": "tess-standard", "label": "Tesseract (عادي)", "group": "free", "key": None},
-    {"id": "tess-fast", "label": "Tesseract (سريع)", "group": "free", "key": None},
-    {"id": "claude", "label": "Claude (ذكاء اصطناعي)", "group": "ai", "key": "claude"},
+    {"id": "tess-standard", "label": msg("Tesseract (عادي)"), "group": "free", "key": None},
+    {"id": "tess-fast", "label": msg("Tesseract (سريع)"), "group": "free", "key": None},
+    {"id": "claude", "label": msg("Claude (ذكاء اصطناعي)"), "group": "ai", "key": "claude"},
     {"id": "google", "label": "Google Vision", "group": "ai", "key": "google"},
 ]
 
@@ -48,7 +49,7 @@ def availability(engine_id: str) -> tuple[bool, str]:
         return ai_engines.claude_available()
     if engine_id == "google":
         return ai_engines.google_available()
-    return False, "محرك غير معروف"
+    return False, msg("محرك غير معروف")
 
 
 def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str = "clean",
@@ -58,7 +59,7 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
     without the page-level steps (handwriting, lists, the number check). direction: "auto" (from the text),
     "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py)."""
     if engine_id not in {e["id"] for e in ENGINES}:
-        raise EngineError("محرك غير معروف")
+        raise EngineError(msg("محرك غير معروف"))
     ok, why = availability(engine_id)
     if not ok:
         raise EngineError(why)
@@ -93,7 +94,7 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
         grids = ltr_page.mirror_grids(grids, W)
         colour = ltr_page.mirror_image(img if mode == "none" else load_image(image_bytes, rotation, "none"))
         img = ltr_page.mirror_image(img)
-    done = (lambda blocks: ltr_page.unmirror_blocks(blocks)) if ltr else (lambda blocks: blocks)  # noqa: E731
+    done = (lambda blocks: in_language(ltr_page.unmirror_blocks(blocks), "en")) if ltr else (lambda blocks: blocks)  # noqa: E731
     if spot:
         return done(lines_to_blocks(lines, low_conf, grids, img.size))
     # handwriting, signatures and stamps leave the text and come back as notes (colour needs the photo itself)

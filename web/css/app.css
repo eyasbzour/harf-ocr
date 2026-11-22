@@ -91,6 +91,11 @@ h2 { font-size: var(--fs-md); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
 
 .i { width: 1.15em; height: 1.15em; flex-shrink: 0; fill: currentColor; vertical-align: -.2em; }
+/* Icons are drawn left to right (Phosphor). The ones that point along the line turn around on a right-to-left page:
+   back, undo and redo, indent, bullets. Alignment icons are physical, and the numbered list's digits must not mirror.
+   By the icon itself, so an icon the code swaps in later (editor.js iconOf) turns too. */
+:root[dir="rtl"] .i:has(> use:is([href$="#arrow-left"], [href$="#arrow-u-up-left"], [href$="#arrow-u-up-right"],
+  [href$="#list-bullets"], [href$="#text-indent"], [href$="#text-outdent"])) { transform: scaleX(-1); }
 .i.big { width: 2.25rem; height: 2.25rem; }
 
 /* ---------------------------------------------------------------- controls */
@@ -669,9 +674,9 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
 .line-why { margin: 0; font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); }
 #noteWord { font-size: var(--fs-md); font-weight: 600; }
 
-.toast { position: fixed; bottom: 1.25rem; inset-inline-start: 50%; transform: translateX(50%); z-index: 60; max-width: min(34rem, 92vw); padding: .7rem 1.1rem; border-radius: var(--r-panel); background: var(--ink); color: var(--surface); font-size: var(--fs-sm); box-shadow: var(--shadow-2); animation: toast-in .2s var(--ease); }
+.toast { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 60; max-width: min(34rem, 92vw); padding: .7rem 1.1rem; border-radius: var(--r-panel); background: var(--ink); color: var(--surface); font-size: var(--fs-sm); box-shadow: var(--shadow-2); animation: toast-in .2s var(--ease); }
 .toast.err { background: var(--danger); color: oklch(99% 0.005 27); }
-@keyframes toast-in { from { opacity: 0; transform: translate(50%, 8px); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
 /* ---------------------------------------------------------------- image editor */
 .img-dlg { width: min(75rem, 96vw); max-width: 96vw; }
@@ -797,9 +802,9 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
   .draftbar .name-input { field-sizing: fixed; flex: 1 1 0; width: 0; min-width: 0; max-width: none; padding-inline: .3rem;
     font-size: var(--fs-base); text-overflow: ellipsis; }
   .draftbar .save-state { flex: none; padding-inline: .15rem; }
-  /* "إنتاج" on the button; its full name stays for screen readers */
-  #btnExport span[data-short] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #btnExport::after { content: "إنتاج"; }
+  /* the button's short name (data-short, in the page's language); its full name stays for screen readers */
+  #btnExport > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #btnExport::after { content: attr(data-short); }
   .phone-slot:empty { display: none; }
   .phone-doc { display: grid; gap: .6rem; padding-bottom: .9rem; border-bottom: 1px solid var(--line); }
   .phone-doc > .inline-field { order: 1; flex-direction: column; align-items: stretch; gap: .35rem; font-weight: 600; color: var(--ink); }

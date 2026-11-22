@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image, ImageOps
+from messages import doc
 
 BIDI_MARKS = re.compile(r"[‎‏‪-‮⁦-⁩]")
 # kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
@@ -133,7 +134,7 @@ def clean_word(text: str) -> str:
 
 
 def low_note(conf: float) -> str:
-    return f"قراءة غير مؤكدة (درجة الثقة {round(conf)}%)، قارن مع الصورة الأصلية"
+    return doc("قراءة غير مؤكدة (درجة الثقة {conf}%)، قارن مع الصورة الأصلية", conf=round(conf))
 
 
 def words_to_segs(words: list[Word], low_conf: float, size: tuple[int, int] | None = None) -> list[dict]:

@@ -100,7 +100,13 @@ Name: "{autodesktop}\Harf OCR"; Filename: "{app}\python\pythonw.exe"; Parameters
 ; also after a silent update (the program closed itself for it), so it opens again
 Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; Description: "{cm:Open}"; Flags: nowait postinstall
 
+[INI]
+; the language setup ran in becomes the program's first language (desktop/app.py language()). A fresh install only:
+; a silent update picks its language from Windows, and must not change the program's.
+Filename: "{app}\lang.ini"; Section: "program"; Key: "lang"; String: "{language}"; Check: IsFreshInstall
+
 [UninstallDelete]
+Type: files; Name: "{app}\lang.ini"
 Type: filesandordirs; Name: "{app}\parts"
 ; cloudflared.exe, downloaded the first time the program is used on a phone (server/remote.py)
 Type: filesandordirs; Name: "{app}\bin"
@@ -109,6 +115,19 @@ Type: filesandordirs; Name: "{app}\models"
 [Code]
 var
   DownloadPage: TDownloadWizardPage;
+  Fresh: Boolean;
+
+// before anything is installed: no earlier copy of the program (its uninstall entry; the GUID is AppId above)
+function InitializeSetup: Boolean;
+begin
+  Fresh := not RegKeyExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F2B8C4E-1D7A-4E59-9C1B-3A5E7D2F8B90}_is1');
+  Result := True;
+end;
+
+function IsFreshInstall: Boolean;
+begin
+  Result := Fresh;
+end;
 
 function HeavyInstalled: Boolean;
 var

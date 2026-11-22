@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
+from messages import msg
 
 REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 NOTES = re.compile(r"<!-- whats-new -->(.*?)<!-- /whats-new -->", re.S)  # release.yml writes these
@@ -73,7 +74,7 @@ def install(quit_app) -> None:
     """Download the newer installer and start it; then close the program (quit_app) so it can be replaced."""
     info = _state["info"] or check()
     if not info:
-        raise RuntimeError("لا يوجد تحديث")
+        raise RuntimeError(msg("لا يوجد تحديث"))
     path = os.path.join(tempfile.gettempdir(), f"HarfOCR-Setup-{info['version']}.exe")
     req = urllib.request.Request(info["url"], headers={"User-Agent": "HarfOCR-updater"})
     with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:

@@ -16,6 +16,7 @@ import threading
 from importlib.util import find_spec
 
 from .common import EngineError, Line, Word, fragments_to_lines
+from messages import msg
 
 REPO = os.environ.get("NUQTA_MODEL", "SalahALHaismawi/Nuqta-Arabic-OCR-0.8B")
 PROMPT = "Transcribe the Arabic text in this image exactly as written. Include only the diacritics (tashkeel) that are visible in the image."
@@ -25,7 +26,7 @@ _lock = threading.Lock()
 
 def available() -> tuple[bool, str]:
     if not (find_spec("torch") and find_spec("transformers")):  # looked up, not imported: listing the readers stays instant
-        return False, "Nuqta غير مثبت على الخادم (pip install transformers accelerate)"
+        return False, msg("Nuqta غير مثبت على الخادم (pip install transformers accelerate)")
     return True, ""
 
 
@@ -89,7 +90,7 @@ def run(img, spot: bool = False) -> list[Line]:
         from . import paddle_engine  # the text lines' places on the page
 
         if not paddle_engine.available()[0]:
-            raise EngineError("قراءة صفحة كاملة بـ Nuqta تحتاج PaddleOCR لتحديد أسطر النص")
+            raise EngineError(msg("قراءة صفحة كاملة بـ Nuqta تحتاج PaddleOCR لتحديد أسطر النص"))
         import numpy as np
 
         frags = paddle_engine._fragments(paddle_engine._get().predict(np.array(img.convert("RGB"))[:, :, ::-1]))
@@ -105,4 +106,4 @@ def run(img, spot: bool = False) -> list[Line]:
     except EngineError:
         raise
     except Exception as e:
-        raise EngineError(f"تعذرت القراءة بـ Nuqta: {e}") from e
+        raise EngineError(msg("تعذرت القراءة بـ Nuqta: {error}", error=e)) from e

@@ -12,10 +12,11 @@ import re
 from collections import Counter
 
 from .common import Line, Word
+from messages import doc
 
 DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 NUM = re.compile(r"\d+")
-NOTE = "رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة"
+NOTE = doc("رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة")
 
 
 def numbers(text: str) -> Counter:

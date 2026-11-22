@@ -6,6 +6,10 @@
 <title>حرف: تحويل الوثائق</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%230066d6%27/%3E%3Cpath d=%27M9 8h14M9 13h14M9 18h14M9 23h9%27 stroke=%27white%27 stroke-width=%272.5%27/%3E%3C/svg%3E">
 <script src="js/theme.js"></script>
+<!-- the interface language (js/i18n.js); lang-default.js and all.js (every web/i18n file) come from the server (main.py) -->
+<script src="js/lang-default.js"></script>
+<script src="js/i18n.js"></script>
+<script src="i18n/all.js"></script>
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -87,7 +91,7 @@
   <div class="draftbar">
     <div class="draftbar-start">
       <button class="btn ghost icon-only" id="btnBack" type="button" title="رجوع إلى المسودات" aria-label="رجوع إلى المسودات">
-        <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#arrow-right"/></svg>
+        <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#arrow-left"/></svg>
       </button>
       <input id="draftName" class="name-input" aria-label="اسم الوثيقة">
       <span id="saveState" class="save-state" role="status" data-state="saved"><svg class="i" aria-hidden="true"><use href="vendor/icons.svg#check-circle"/></svg><span>محفوظ</span></span>
@@ -131,8 +135,8 @@
       <button class="btn" id="btnQuick" type="button" data-phone-in="phoneDocSlot" title="يقرأ كل الصفحات غير المقروءة ثم ينتج الملف مباشرة، والمواضع غير الواضحة تُظلَّل">
         <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#lightning"/></svg><span>قراءة الكل والإنتاج</span>
       </button>
-      <button class="btn primary" id="btnExport" type="button">
-        <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#file-arrow-down"/></svg><span data-short="إنتاج">إنتاج الملف</span>
+      <button class="btn primary" id="btnExport" type="button" data-short="إنتاج">
+        <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#file-arrow-down"/></svg><span>إنتاج الملف</span>
       </button>
     </div>
   </div>
@@ -326,6 +330,11 @@
       </button>
     </div>
     <div class="dlg-body">
+    <div class="field">
+      <span id="setLangHead"><svg class="i" aria-hidden="true"><use href="vendor/icons.svg#globe"/></svg> اللغة</span>
+      <!-- a button per language (web/i18n), named in its own language: app.js showLang -->
+      <div class="seg" id="setLang" role="group" aria-labelledby="setLangHead"></div>
+    </div>
     <div class="field">
       <span id="setThemeHead">المظهر</span>
       <div class="seg theme-seg" id="setTheme" role="group" aria-labelledby="setThemeHead">
@@ -574,6 +583,7 @@
   <div class="sel-list" id="selList" role="listbox" aria-labelledby="selTitle"></div>
 </div>
 
+<script>I18N.apply(document.documentElement);</script>
 <script src="vendor/jszip.min.js"></script>
 <script src="vendor/tiptap.min.js"></script>
 <script src="js/blocks-doc.js"></script>

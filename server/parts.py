@@ -17,6 +17,7 @@ import threading
 import urllib.request
 import zipfile
 from pathlib import Path
+from messages import msg, payload
 
 REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
@@ -45,7 +46,7 @@ def start() -> None:
         if _state["state"] in ("downloading", "unpacking"):
             return
         if shutil.disk_usage(ROOT).free < NEED:
-            raise RuntimeError("لا توجد مساحة كافية على القرص: يلزم نحو 7 جيجابايت فارغة.")
+            raise RuntimeError(msg("لا توجد مساحة كافية على القرص: يلزم نحو 7 جيجابايت فارغة."))
         _state.update(state="downloading", done=0, total=0, error="")
         _stop.clear()
     threading.Thread(target=_run, daemon=True, name="parts").start()
@@ -68,7 +69,7 @@ def _run() -> None:
         with _get(f"https://api.github.com/repos/{REPO}/releases/tags/{tag}") as r:
             assets = {a["name"]: a for a in json.load(r).get("assets", []) if a["name"] in ASSETS}
         if len(assets) < len(ASSETS):
-            raise RuntimeError("ملفات القرّاء غير موجودة في إصدار " + tag)
+            raise RuntimeError(msg("ملفات القرّاء غير موجودة في إصدار {tag}", tag=tag))
         _state["total"] = sum(a["size"] for a in assets.values())
         for name, a in assets.items():
             with _get(a["browser_download_url"]) as r, open(tmp / name, "wb") as f:
@@ -99,6 +100,6 @@ def _run() -> None:
     except _Stopped:
         _state.update(state="idle", done=0, total=0, error="")
     except Exception as e:
-        _state.update(state="error", error=f"تعذر تنزيل القرّاء الإضافيين: {e}")
+        _state.update(state="error", error=payload(msg("تعذر تنزيل القرّاء الإضافيين: {error}", error=e)))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

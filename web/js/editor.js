@@ -60,9 +60,9 @@
     return ({ node, getPos, editor }) => {
       const dom = document.createElement(inline ? 'span' : 'figure'); dom.className = inline ? 'fig-inline' : 'fig';
       const box = document.createElement('span'); box.className = 'fig-box';
-      const img = document.createElement('img'); img.alt = inline ? 'صورة في السطر' : 'صورة مدرجة'; img.draggable = false;
+      const img = document.createElement('img'); img.alt = inline ? tx('صورة في السطر') : tx('صورة مدرجة'); img.draggable = false;
       const handles = ['left', 'right'].map((side) => {
-        const h = document.createElement('span'); h.className = 'fig-handle'; h.dataset.side = side; h.title = 'اسحب لتغيير حجم الصورة';
+        const h = document.createElement('span'); h.className = 'fig-handle'; h.dataset.side = side; h.title = tx('اسحب لتغيير حجم الصورة');
         return h;
       });
       const frame = document.createElement('span'); frame.className = 'crop-frame';
@@ -204,7 +204,7 @@
       const a = node.attrs;
       return ['figure', { class: 'fig', 'data-image': a.image, 'data-w': a.w, 'data-h': a.h, 'data-wfrac': a.wFrac, 'data-align': a.align || '',
         'data-wrap': a.wrap || '', 'data-x': a.x, 'data-y': a.y, 'data-border': a.border || '' },
-        ['img', { src: this.options.src(a.image), alt: 'صورة مدرجة', draggable: 'false', style: 'width:' + pct(a) }]];
+        ['img', { src: this.options.src(a.image), alt: tx('صورة مدرجة'), draggable: 'false', style: 'width:' + pct(a) }]];
     },
     addNodeView() { return pictureView(this.options.src, false); },
   });
@@ -223,7 +223,7 @@
     parseHTML() { return [{ tag: 'img.fig-inline' }]; },
     renderHTML({ node }) {
       const a = node.attrs;
-      return ['img', { class: 'fig-inline', src: this.options.src(a.image), alt: 'صورة في السطر', 'data-image': a.image, 'data-w': a.w, 'data-h': a.h,
+      return ['img', { class: 'fig-inline', src: this.options.src(a.image), alt: tx('صورة في السطر'), 'data-image': a.image, 'data-w': a.w, 'data-h': a.h,
         'data-wfrac': a.wFrac, 'data-border': a.border || '', style: 'width:' + pct(a) }];
     },
     addNodeView() { return pictureView(this.options.src, true); },
@@ -420,7 +420,7 @@
       ],
       content: window.BlocksDoc.blocksToDoc(blocks),
       editorProps: {
-        attributes: { dir: 'rtl', class: 'doc', spellcheck: 'false', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'نص الصفحة' },
+        attributes: { dir: 'rtl', class: 'doc', spellcheck: 'false', role: 'textbox', 'aria-multiline': 'true', 'aria-label': tx('نص الصفحة') },
         // Enter or Esc ends cropping a picture (editor.js pictureView)
         handleKeyDown: (view, e) => {
           if ((e.key === 'Enter' || e.key === 'Escape') && el.docEditor && el.docEditor.cropping()) { el.docEditor.cropPicture(); return true; }
@@ -735,6 +735,9 @@
 
   // ------------------------------------------------------------------ toolbar
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  // right, center and left are places on the paper: on screen they keep that order, left on the left, whichever way
+  // the toolbar reads. Given left to right; a right-to-left toolbar lays out from the right, so it gets them reversed.
+  const physical = (leftToRight) => (document.documentElement.dir === 'rtl' ? leftToRight.slice().reverse() : leftToRight);
   function icon(name) {
     const s = document.createElementNS(SVG_NS, 'svg'); s.setAttribute('class', 'i'); s.setAttribute('aria-hidden', 'true');
     const u = document.createElementNS(SVG_NS, 'use'); u.setAttribute('href', 'vendor/icons.svg#' + name); s.append(u); return s;
@@ -804,10 +807,10 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) { const b = open.btn; closePop(); b.focus(); } });
 
     // Word's standard colours and their light tints
-    const COLORS = [['#c00000', 'أحمر داكن'], ['#ff0000', 'أحمر'], ['#ffc000', 'برتقالي'], ['#ffff00', 'أصفر'], ['#92d050', 'أخضر فاتح'],
-      ['#00b050', 'أخضر'], ['#00b0f0', 'أزرق فاتح'], ['#0070c0', 'أزرق'], ['#002060', 'كحلي'], ['#7030a0', 'بنفسجي'],
-      ['#000000', 'أسود'], ['#404040', 'رمادي داكن'], ['#7f7f7f', 'رمادي'], ['#bfbfbf', 'رمادي فاتح'], ['#f2f2f2', 'رمادي باهت'],
-      ['#fce4d6', 'خوخي فاتح'], ['#fff2cc', 'أصفر باهت'], ['#e2efda', 'أخضر باهت'], ['#ddebf7', 'أزرق باهت'], ['#ede7f6', 'بنفسجي باهت']];
+    const COLORS = [['#c00000', tx('أحمر داكن')], ['#ff0000', tx('أحمر')], ['#ffc000', tx('برتقالي')], ['#ffff00', tx('أصفر')], ['#92d050', tx('أخضر فاتح')],
+      ['#00b050', tx('أخضر')], ['#00b0f0', tx('أزرق فاتح')], ['#0070c0', tx('أزرق')], ['#002060', tx('كحلي')], ['#7030a0', tx('بنفسجي')],
+      ['#000000', tx('أسود')], ['#404040', tx('رمادي داكن')], ['#7f7f7f', tx('رمادي')], ['#bfbfbf', tx('رمادي فاتح')], ['#f2f2f2', tx('رمادي باهت')],
+      ['#fce4d6', tx('خوخي فاتح')], ['#fff2cc', tx('أصفر باهت')], ['#e2efda', tx('أخضر باهت')], ['#ddebf7', tx('أزرق باهت')], ['#ede7f6', tx('بنفسجي باهت')]];
     const palette = (noneLabel, apply) => (pop) => {
       const done = (c) => { apply(get(), c); closePop(); closeDrops(); };
       const none = document.createElement('button');
@@ -823,14 +826,14 @@
       const more = document.createElement('label'); more.className = 'pal-more';
       const pick = document.createElement('input'); pick.type = 'color'; pick.value = '#0070c0';
       pick.addEventListener('change', () => done(pick.value));
-      more.append(document.createTextNode('لون آخر'), pick);
+      more.append(document.createTextNode(tx('لون آخر')), pick);
       pop.append(none, grid, more);
     };
 
     const style = group();
     const sel = document.createElement('select');
-    sel.setAttribute('aria-label', 'نوع السطر'); sel.title = 'نوع السطر';
-    [['p', 'فقرة'], ['h1', 'عنوان رئيسي'], ['h2', 'عنوان'], ['h3', 'عنوان فرعي'], ['q', 'اقتباس']].forEach(([v, l]) => {
+    sel.setAttribute('aria-label', tx('نوع السطر')); sel.title = tx('نوع السطر');
+    [['p', tx('فقرة')], ['h1', tx('عنوان رئيسي')], ['h2', tx('عنوان')], ['h3', tx('عنوان فرعي')], ['q', tx('اقتباس')]].forEach(([v, l]) => {
       const o = document.createElement('option'); o.value = v; o.textContent = l; sel.append(o);
     });
     sel.addEventListener('change', () => {
@@ -847,9 +850,9 @@
     // already has that is not in the list (a pasted 15) shows as one more choice
     const SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
     const size = document.createElement('select');
-    size.className = 'tb-size'; size.title = 'حجم النص المحدد (نقطة)'; size.setAttribute('aria-label', 'حجم النص المحدد بالنقاط');
+    size.className = 'tb-size'; size.title = tx('حجم النص المحدد (نقطة)'); size.setAttribute('aria-label', tx('حجم النص المحدد بالنقاط'));
     const sizeOpt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; };
-    const sizeList = (extra) => size.replaceChildren(sizeOpt('', 'تلقائي'),
+    const sizeList = (extra) => size.replaceChildren(sizeOpt('', tx('تلقائي')),
       ...SIZES.concat(extra && !SIZES.includes(+extra) ? [+extra] : []).sort((x, y) => x - y).map((n) => sizeOpt(String(n), String(n))));
     sizeList();
     size.addEventListener('change', () => {
@@ -871,17 +874,17 @@
     } });
 
     const fmt = group();
-    [['text-b', 'عريض', 'Ctrl+B', 'bold'], ['text-italic', 'مائل', 'Ctrl+I', 'italic'], ['text-underline', 'تحته خط', 'Ctrl+U', 'underline'],
-      ['text-strikethrough', 'يتوسطه خط', 'Ctrl+Shift+S', 'strike']].forEach(([ic, label, keys, mark]) => {
+    [['text-b', tx('عريض'), 'Ctrl+B', 'bold'], ['text-italic', tx('مائل'), 'Ctrl+I', 'italic'], ['text-underline', tx('تحته خط'), 'Ctrl+U', 'underline'],
+      ['text-strikethrough', tx('يتوسطه خط'), 'Ctrl+Shift+S', 'strike']].forEach(([ic, label, keys, mark]) => {
       const cap = mark[0].toUpperCase() + mark.slice(1);
       button(fmt, { icon: ic, label, keys, run: (pe) => pe.chain()['toggle' + cap]().run(), on: (pe) => pe.editor.isActive(mark),
         enabled: (pe) => can(pe, (c) => c['toggle' + cap]()) });
     });
-    popover(button(fmt, { icon: 'text-a-underline', label: 'لون النص', run: () => {} }),
-      palette('تلقائي (أسود)', (pe, c) => (c ? pe.chain().setColor(c) : pe.chain().unsetColor()).run()));
-    popover(button(fmt, { icon: 'highlighter', label: 'لون خلفية النص', run: () => {} }),
-      palette('بلا لون', (pe, c) => (c ? pe.chain().setBackgroundColor(c) : pe.chain().unsetBackgroundColor()).run()));
-    button(fmt, { icon: 'eraser', label: 'إزالة التنسيق (يبقى التعليم)', run: (pe) => pe.chain().unsetBold().unsetItalic().unsetUnderline().unsetStrike()
+    popover(button(fmt, { icon: 'text-a-underline', label: tx('لون النص'), run: () => {} }),
+      palette(tx('تلقائي (أسود)'), (pe, c) => (c ? pe.chain().setColor(c) : pe.chain().unsetColor()).run()));
+    popover(button(fmt, { icon: 'highlighter', label: tx('لون خلفية النص'), run: () => {} }),
+      palette(tx('بلا لون'), (pe, c) => (c ? pe.chain().setBackgroundColor(c) : pe.chain().unsetBackgroundColor()).run()));
+    button(fmt, { icon: 'eraser', label: tx('إزالة التنسيق (يبقى التعليم)'), run: (pe) => pe.chain().unsetBold().unsetItalic().unsetUnderline().unsetStrike()
       .unsetColor().unsetBackgroundColor().unsetFontSize().run() });
 
     // a menu of rows (line spacing, wrap): [label, chosen?, run]; a row with no run is a heading, and
@@ -911,10 +914,10 @@
     };
 
     // Word's bullet and numbering libraries in one menu: each tile shows three lines of the list
-    const BULLETS = [[null, '•', 'نقطة'], ['circle', '○', 'دائرة'], ['square', '■', 'مربع'], ['diamond', '◆', 'معيّن'], ['arrow', '➢', 'سهم'], ['check', '✓', 'علامة صح']];
-    const NUMBERS = [[null, ['1.', '2.', '3.'], 'أرقام'], ['hindi', ['١.', '٢.', '٣.'], 'أرقام هندية'], ['alpha-ar', ['أ.', 'ب.', 'ت.'], 'حروف عربية'],
-      ['paren', ['1)', '2)', '3)'], 'أرقام وقوس'], ['lower', ['a.', 'b.', 'c.'], 'حروف لاتينية صغيرة'], ['upper', ['A.', 'B.', 'C.'], 'حروف لاتينية كبيرة'],
-      ['roman', ['i.', 'ii.', 'iii.'], 'أرقام رومانية']];
+    const BULLETS = [[null, '•', tx('نقطة')], ['circle', '○', tx('دائرة')], ['square', '■', tx('مربع')], ['diamond', '◆', tx('معيّن')], ['arrow', '➢', tx('سهم')], ['check', '✓', tx('علامة صح')]];
+    const NUMBERS = [[null, ['1.', '2.', '3.'], tx('أرقام')], ['hindi', ['١.', '٢.', '٣.'], tx('أرقام هندية')], ['alpha-ar', ['أ.', 'ب.', 'ت.'], tx('حروف عربية')],
+      ['paren', ['1)', '2)', '3)'], tx('أرقام وقوس')], ['lower', ['a.', 'b.', 'c.'], tx('حروف لاتينية صغيرة')], ['upper', ['A.', 'B.', 'C.'], tx('حروف لاتينية كبيرة')],
+      ['roman', ['i.', 'ii.', 'iii.'], tx('أرقام رومانية')]];
     const listMenu = (pop) => {
       const at = get().listAt();
       const lib = (name, kind, styles) => {
@@ -935,58 +938,58 @@
         const h = document.createElement('h5'); h.textContent = name;
         pop.append(h, grid);
       };
-      lib('تعداد نقطي', 'bullet', BULLETS);
-      lib('ترقيم', 'number', NUMBERS);
+      lib(tx('تعداد نقطي'), 'bullet', BULLETS);
+      lib(tx('ترقيم'), 'number', NUMBERS);
       const none = document.createElement('button');
-      none.type = 'button'; none.className = 'pal-none'; none.textContent = 'بلا قائمة'; none.disabled = !at;
+      none.type = 'button'; none.className = 'pal-none'; none.textContent = tx('بلا قائمة'); none.disabled = !at;
       none.addEventListener('click', () => { get().setList(null); closePop(); closeDrops(); });
       pop.append(none);
     };
     const listOn = (pe) => !!pe.listAt();
     const list = group();
     const listIcon = (pe) => ((pe.listAt() || {}).kind === 'number' ? 'list-numbers' : 'list-bullets');  // the kind in use
-    popover(button(list, { icon: 'list-bullets', label: 'التعداد النقطي والترقيم', run: () => {}, on: listOn, iconOf: listIcon, enabled: (pe) => pe.canList() }), listMenu);
+    popover(button(list, { icon: 'list-bullets', label: tx('التعداد النقطي والترقيم'), run: () => {}, on: listOn, iconOf: listIcon, enabled: (pe) => pe.canList() }), listMenu);
     // pages are right to left: indenting moves the item left, so the arrows point that way
-    button(list, { icon: 'text-outdent', label: 'إنقاص المسافة البادئة', keys: 'Shift+Tab', run: (pe) => pe.chain().liftListItem('listItem').run(),
+    button(list, { icon: 'text-outdent', label: tx('إنقاص المسافة البادئة'), keys: 'Shift+Tab', run: (pe) => pe.chain().liftListItem('listItem').run(),
       enabled: (pe) => can(pe, (c) => c.liftListItem('listItem')) });
-    button(list, { icon: 'text-indent', label: 'زيادة المسافة البادئة', keys: 'Tab', run: (pe) => pe.chain().sinkListItem('listItem').run(),
+    button(list, { icon: 'text-indent', label: tx('زيادة المسافة البادئة'), keys: 'Tab', run: (pe) => pe.chain().sinkListItem('listItem').run(),
       enabled: (pe) => can(pe, (c) => c.sinkListItem('listItem')) });
 
     const align = group();
-    [['right', 'text-align-right', 'محاذاة لليمين'], ['center', 'text-align-center', 'توسيط'], ['left', 'text-align-left', 'محاذاة لليسار'],
-      ['justify', 'text-align-justify', 'ضبط من الجهتين']].forEach(([a, ic, label]) => {
+    [...physical([['left', 'text-align-left', tx('محاذاة لليسار')], ['center', 'text-align-center', tx('توسيط')], ['right', 'text-align-right', tx('محاذاة لليمين')]]),
+      ['justify', 'text-align-justify', tx('ضبط من الجهتين')]].forEach(([a, ic, label]) => {
       button(align, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), enabled: (pe) => a !== 'justify' || !pe.editor.isActive('figure') });
     });
-    button(align, { icon: 'arrows-left-right', label: 'اتجاه الفقرة: من اليسار (إنجليزي) أو من اليمين', run: (pe) => pe.toggleDir(),
+    button(align, { icon: 'arrows-left-right', label: tx('اتجاه الفقرة: من اليسار (إنجليزي) أو من اليمين'), run: (pe) => pe.toggleDir(),
       on: (pe) => pe.isLtr(), enabled: (pe) => !pe.editor.isActive('figure') });
     // Word's Borders button for paragraphs; the line style chosen is kept for the next borders
     let borderStyle = 'single';
-    popover(button(align, { icon: 'square-half-bottom', label: 'حدود الفقرة', run: () => {}, enabled: (pe) => !!pe.spacing(), on: (pe) => !!pe.borders() }), (pop) => {
+    popover(button(align, { icon: 'square-half-bottom', label: tx('حدود الفقرة'), run: () => {}, enabled: (pe) => !!pe.spacing(), on: (pe) => !!pe.borders() }), (pop) => {
       const b = get().borders() || {};
       const has = (k) => !!b[k];
       const box = ['top', 'bottom', 'left', 'right'].every(has);
       const side = (label, k) => [label, has(k), (pe) => pe.setBorders(k, borderStyle)];
-      menu(pop, [['الحدود'],
-        side('حد سفلي', 'bottom'), side('حد علوي', 'top'), side('حد أيمن', 'right'), side('حد أيسر', 'left'),
-        ['بلا حدود', !Object.keys(b).length, (pe) => pe.setBorders('none')],
-        ['كل الحدود (مع خط بين الفقرات)', box && has('between'), (pe) => pe.setBorders('all', borderStyle)],
-        ['الحدود الخارجية', box && !has('between'), (pe) => pe.setBorders('outside', borderStyle)],
-        ['نمط الخط'],
-        ['chips', [['single', 'مفرد'], ['thick', 'سميك'], ['double', 'مزدوج'], ['dashed', 'متقطع'], ['dotted', 'منقّط']].map(([v, label]) =>
+      menu(pop, [[tx('الحدود')],
+        side(tx('حد سفلي'), 'bottom'), side(tx('حد علوي'), 'top'), side(tx('حد أيمن'), 'right'), side(tx('حد أيسر'), 'left'),
+        [tx('بلا حدود'), !Object.keys(b).length, (pe) => pe.setBorders('none')],
+        [tx('كل الحدود (مع خط بين الفقرات)'), box && has('between'), (pe) => pe.setBorders('all', borderStyle)],
+        [tx('الحدود الخارجية'), box && !has('between'), (pe) => pe.setBorders('outside', borderStyle)],
+        [tx('نمط الخط')],
+        ['chips', [['single', tx('مفرد')], ['thick', tx('سميك')], ['double', tx('مزدوج')], ['dashed', tx('متقطع')], ['dotted', tx('منقّط')]].map(([v, label]) =>
           [label, borderStyle === v, (pe) => { borderStyle = v; if (Object.keys(b).length) pe.setBorders('style', v); }])]]);
     });
     // Word's line and paragraph spacing menu; 1.25 is what a paragraph has until it is given another
-    popover(button(align, { icon: 'arrows-out-line-vertical', label: 'تباعد الأسطر والفقرات', run: () => {}, enabled: (pe) => !!pe.spacing() }), (pop) => {
+    popover(button(align, { icon: 'arrows-out-line-vertical', label: tx('تباعد الأسطر والفقرات'), run: () => {}, enabled: (pe) => !!pe.spacing() }), (pop) => {
       const sp = get().spacing() || {};
-      const rows = [['تباعد الأسطر']];
-      [[1, '1.0'], [1.15, '1.15'], [null, '1.25 (المعتاد)'], [1.5, '1.5'], [2, '2.0'], [2.5, '2.5'], [3, '3.0']].forEach(([v, label]) => {
+      const rows = [[tx('تباعد الأسطر')]];
+      [[1, '1.0'], [1.15, '1.15'], [null, tx('1.25 (المعتاد)')], [1.5, '1.5'], [2, '2.0'], [2.5, '2.5'], [3, '3.0']].forEach(([v, label]) => {
         rows.push([label, (sp.lineHeight || null) === v, (pe) => pe.setSpacing({ lineHeight: v })]);
       });
-      rows.push(['الفقرة']);
-      rows.push(sp.spaceBefore ? ['إزالة المسافة قبل الفقرة', false, (pe) => pe.setSpacing({ spaceBefore: null })]
-        : ['إضافة مسافة قبل الفقرة', false, (pe) => pe.setSpacing({ spaceBefore: 12 })]);
-      rows.push(sp.spaceAfter === 0 ? ['إضافة مسافة بعد الفقرة', false, (pe) => pe.setSpacing({ spaceAfter: null })]
-        : ['إزالة المسافة بعد الفقرة', false, (pe) => pe.setSpacing({ spaceAfter: 0 })]);
+      rows.push([tx('الفقرة')]);
+      rows.push(sp.spaceBefore ? [tx('إزالة المسافة قبل الفقرة'), false, (pe) => pe.setSpacing({ spaceBefore: null })]
+        : [tx('إضافة مسافة قبل الفقرة'), false, (pe) => pe.setSpacing({ spaceBefore: 12 })]);
+      rows.push(sp.spaceAfter === 0 ? [tx('إضافة مسافة بعد الفقرة'), false, (pe) => pe.setSpacing({ spaceAfter: null })]
+        : [tx('إزالة المسافة بعد الفقرة'), false, (pe) => pe.setSpacing({ spaceAfter: 0 })]);
       menu(pop, rows);
     });
 
@@ -998,19 +1001,19 @@
       closePop(); closeDrops();
     };
     // like Word: point at the grid for the size, or type any number of rows and columns
-    popover(button(ins, { icon: 'table', text: 'جدول', label: 'إدراج جدول', run: () => {} }), (pop) => {
+    popover(button(ins, { icon: 'table', text: tx('جدول'), label: tx('إدراج جدول'), run: () => {} }), (pop) => {
       const R = 8, C = 8;
-      const label = document.createElement('div'); label.className = 'grid-label'; label.textContent = 'اختر عدد الصفوف والأعمدة';
+      const label = document.createElement('div'); label.className = 'grid-label'; label.textContent = tx('اختر عدد الصفوف والأعمدة');
       const grid = document.createElement('div'); grid.className = 'tbl-grid'; grid.style.gridTemplateColumns = `repeat(${C}, 1fr)`;
       const cells = [];
       const mark = (r, c) => {
         cells.forEach((b) => b.classList.toggle('on', +b.dataset.r <= r && +b.dataset.c <= c));
-        label.textContent = `${r} ${r === 1 ? 'صف' : 'صفوف'} × ${c} ${c === 1 ? 'عمود' : 'أعمدة'}`;  // spelled out: digits alone read backwards in RTL
+        label.textContent = tx('{rows} × {cols}', { rows: tx('{n} صفوف', { n: r }), cols: tx('{n} أعمدة', { n: c }) });  // spelled out: digits alone read backwards in RTL
       };
       for (let r = 1; r <= R; r++) {
         for (let c = 1; c <= C; c++) {
           const b = document.createElement('button');
-          b.type = 'button'; b.dataset.r = r; b.dataset.c = c; b.setAttribute('aria-label', `${r} صف × ${c} عمود`);
+          b.type = 'button'; b.dataset.r = r; b.dataset.c = c; b.setAttribute('aria-label', tx('{rows} × {cols}', { rows: tx('{n} صفوف', { n: r }), cols: tx('{n} أعمدة', { n: c }) }));
           b.addEventListener('mouseenter', () => mark(r, c)); b.addEventListener('focus', () => mark(r, c));
           b.addEventListener('click', () => insertTable(r, c));
           grid.append(b); cells.push(b);
@@ -1021,29 +1024,29 @@
         const l = document.createElement('label'); const i = document.createElement('input');
         i.type = 'number'; i.min = '1'; i.max = '50'; i.value = v; l.append(document.createTextNode(lbl), i); custom.append(l); return i;
       };
-      const rr = num('صفوف', 3), cc = num('أعمدة', 3);
-      const go = document.createElement('button'); go.type = 'button'; go.className = 'btn small primary'; go.textContent = 'إدراج';
+      const rr = num(tx('صفوف'), 3), cc = num(tx('أعمدة'), 3);
+      const go = document.createElement('button'); go.type = 'button'; go.className = 'btn small primary'; go.textContent = tx('إدراج');
       go.addEventListener('click', () => insertTable(Math.max(1, Math.min(50, +rr.value || 1)), Math.max(1, Math.min(20, +cc.value || 1))));
       custom.append(go);
       pop.append(label, grid, custom);
     });
-    popover(button(ins, { icon: 'images', text: 'صورة', label: 'إدراج صورة', run: () => {}, always: true, enabled: () => actions.hasPage() }), (pop) => {
-      menu(pop, [['صورة من الجهاز…', false, () => actions.pickImage()],
-        ['جزء من صورة الصفحة (شعار، رسم، توقيع)', false, () => actions.picture()]]);
+    popover(button(ins, { icon: 'images', text: tx('صورة'), label: tx('إدراج صورة'), run: () => {}, always: true, enabled: () => actions.hasPage() }), (pop) => {
+      menu(pop, [[tx('صورة من الجهاز…'), false, () => actions.pickImage()],
+        [tx('جزء من صورة الصفحة (شعار، رسم، توقيع)'), false, () => actions.picture()]]);
     }, true);
-    const flagBtn = button(ins, { icon: 'flag', text: 'تعليم', label: 'تعليم النص المحدد كملاحظة', run: () => actions.flag(), always: true, enabled: (pe) => !!pe });
+    const flagBtn = button(ins, { icon: 'flag', text: tx('تعليم'), label: tx('تعليم النص المحدد كملاحظة'), run: () => actions.flag(), always: true, enabled: (pe) => !!pe });
     const insOwn = [...ins.children];
 
     // the line at the cursor: its spot on the photo, and reading it again with another engine (the app's panel)
     const again = group();
-    const rereadBtn = button(again, { icon: 'scan', text: 'أعد القراءة', label: 'السطر في صورة الصفحة، وقراءته بقارئ آخر', run: () => actions.showLine() });
+    const rereadBtn = button(again, { icon: 'scan', text: tx('أعد القراءة'), label: tx('السطر في صورة الصفحة، وقراءته بقارئ آخر'), run: () => actions.showLine() });
     // a click into the text shows that line on the photo; this turns that off and on (remembered on this computer)
-    const eyeBtn = button(again, { icon: 'eye', cls: 'tb-eye', label: 'معاينة السطر من الصورة عند النقر', always: true, on: () => actions.previewOn(),
+    const eyeBtn = button(again, { icon: 'eye', cls: 'tb-eye', label: tx('معاينة السطر من الصورة عند النقر'), always: true, on: () => actions.previewOn(),
       run: () => { actions.togglePreview(); update(); } });
 
     const hist = group();
-    const undoBtn = button(hist, { icon: 'arrow-u-up-right', label: 'تراجع', keys: 'Ctrl+Z', run: (pe) => pe.chain().undo().run(), enabled: (pe) => can(pe, (c) => c.undo()) });
-    const redoBtn = button(hist, { icon: 'arrow-u-up-left', label: 'إعادة', keys: 'Ctrl+Y', run: (pe) => pe.chain().redo().run(), enabled: (pe) => can(pe, (c) => c.redo()) });
+    const undoBtn = button(hist, { icon: 'arrow-u-up-left', label: tx('تراجع'), keys: 'Ctrl+Z', run: (pe) => pe.chain().undo().run(), enabled: (pe) => can(pe, (c) => c.undo()) });
+    const redoBtn = button(hist, { icon: 'arrow-u-up-right', label: tx('إعادة'), keys: 'Ctrl+Y', run: (pe) => pe.chain().redo().run(), enabled: (pe) => can(pe, (c) => c.redo()) });
 
     // phones: three menus (the text, the paragraph, inserts) so the row fits the width; app.js closes them like its own
     // popovers (outside, Esc, its dim). A menu's button shows what is on inside it: lit, or (mirror: a group) the icon of
@@ -1071,8 +1074,8 @@
         else x.sum.classList.toggle('on', !!on);
       }
     }
-    const dText = drop('text-aa', 'النص', { once: false }), dPara = drop('text-align-right', 'الفقرة', { mirror: align }),
-      dMore = drop('dots-three', 'إدراج والسطر');
+    const dText = drop('text-aa', tx('النص'), { once: false }), dPara = drop('text-align-right', tx('الفقرة'), { mirror: align }),
+      dMore = drop('dots-three', tx('إدراج والسطر'));
     const part = (name, ...kids) => {  // a named part of a menu
       const s = document.createElement('div'); s.className = 'tb-sec';
       const h = document.createElement('h5'); h.textContent = name; s.append(h, ...kids); return s;
@@ -1088,16 +1091,16 @@
     let laidOut = null;
     // phones: spacing and borders as named rows of their own in the paragraph's sheet (their icons alone say little)
     const alignOwn = [...align.children], paraRows = group('tb-rows', document.createElement('div'));
-    const paraMore = alignOwn.filter((b) => ['تباعد الأسطر والفقرات', 'حدود الفقرة'].includes(b.getAttribute('aria-label')));
+    const paraMore = alignOwn.filter((b) => [tx('تباعد الأسطر والفقرات'), tx('حدود الفقرة')].includes(b.getAttribute('aria-label')));
     const arrange = () => {
       const p = phone();
       if (p === laidOut) return;
       laidOut = p; closePop(); closeDrops();
       if (p) {
         marks.replaceChildren(boldB, italB, undB, strikeB); colors.replaceChildren(colorB, markB, eraserB);
-        dText.fill(part('نوع السطر والحجم', style), part('شكل الخط', marks), part('الألوان', colors));
+        dText.fill(part(tx('نوع السطر والحجم'), style), part(tx('شكل الخط'), marks), part(tx('الألوان'), colors));
         align.replaceChildren(...alignOwn.filter((b) => !paraMore.includes(b))); paraRows.replaceChildren(...paraMore);
-        dPara.fill(part('القوائم', list), part('المحاذاة والاتجاه', align), part('التباعد والحدود', paraRows));
+        dPara.fill(part(tx('القوائم'), list), part(tx('المحاذاة والاتجاه'), align), part(tx('التباعد والحدود'), paraRows));
         ins.replaceChildren(...insOwn.filter((n) => n !== flagBtn)); again.replaceChildren(rereadBtn, eyeBtn); dMore.fill(ins, again);
         quick.replaceChildren(flagBtn, undoBtn, redoBtn, dText.d, dPara.d, dMore.d);  // flags first: they are the review
         bar.replaceChildren(quick);
@@ -1112,7 +1115,7 @@
     // ---- the floating bar
     const float = document.createElement('div');
     float.className = 'tb-float'; float.hidden = true;
-    float.setAttribute('role', 'toolbar'); float.setAttribute('aria-label', 'أدوات التحديد');
+    float.setAttribute('role', 'toolbar'); float.setAttribute('aria-label', tx('أدوات التحديد'));
     floatHost.append(float);
     const working = (pe) => pe.editor.isFocused || float.contains(document.activeElement) || bar.contains(document.activeElement);
     const isCells = (pe) => '$anchorCell' in pe.editor.state.selection;  // several table cells selected
@@ -1125,49 +1128,49 @@
     const when = (m) => (pe) => mode(pe) === m;
 
     const ft = group('', float);
-    [['text-b', 'عريض', 'bold'], ['text-italic', 'مائل', 'italic'], ['text-underline', 'تحته خط', 'underline'], ['text-strikethrough', 'يتوسطه خط', 'strike']]
+    [['text-b', tx('عريض'), 'bold'], ['text-italic', tx('مائل'), 'italic'], ['text-underline', tx('تحته خط'), 'underline'], ['text-strikethrough', tx('يتوسطه خط'), 'strike']]
       .forEach(([ic, label, mark]) => {
         const cap = mark[0].toUpperCase() + mark.slice(1);
         button(ft, { icon: ic, label, run: (pe) => pe.chain()['toggle' + cap]().run(), on: (pe) => pe.editor.isActive(mark), show: when('text') });
       });
-    popover(button(ft, { icon: 'list-bullets', label: 'التعداد النقطي والترقيم', run: () => {}, on: listOn, iconOf: listIcon, show: when('text'), enabled: (pe) => pe.canList() }), listMenu);
-    button(ft, { icon: 'flag', text: 'تعليم', label: 'تعليم كملاحظة', run: () => actions.flag(), always: true, show: when('text') });
+    popover(button(ft, { icon: 'list-bullets', label: tx('التعداد النقطي والترقيم'), run: () => {}, on: listOn, iconOf: listIcon, show: when('text'), enabled: (pe) => pe.canList() }), listMenu);
+    button(ft, { icon: 'flag', text: tx('تعليم'), label: tx('تعليم كملاحظة'), run: () => actions.flag(), always: true, show: when('text') });
 
     const inTable = when('table');
-    button(ft, { text: '+ صف', label: 'إضافة صف', run: (pe) => pe.chain().addRowAfter().run(), show: inTable });
-    button(ft, { text: '− صف', label: 'حذف الصف', run: (pe) => pe.chain().deleteRow().run(), show: inTable, enabled: (pe) => can(pe, (c) => c.deleteRow()) });
-    button(ft, { text: '+ عمود', label: 'إضافة عمود', run: (pe) => pe.chain().addColumnAfter().run(), show: inTable });
-    button(ft, { text: '− عمود', label: 'حذف العمود', run: (pe) => pe.chain().deleteColumn().run(), show: inTable, enabled: (pe) => can(pe, (c) => c.deleteColumn()) });
-    button(ft, { icon: 'table', text: 'خطوط', label: 'إظهار خطوط الجدول', run: (pe) => pe.toggleTableLines(), show: inTable,
+    button(ft, { text: tx('+ صف'), label: tx('إضافة صف'), run: (pe) => pe.chain().addRowAfter().run(), show: inTable });
+    button(ft, { text: tx('− صف'), label: tx('حذف الصف'), run: (pe) => pe.chain().deleteRow().run(), show: inTable, enabled: (pe) => can(pe, (c) => c.deleteRow()) });
+    button(ft, { text: tx('+ عمود'), label: tx('إضافة عمود'), run: (pe) => pe.chain().addColumnAfter().run(), show: inTable });
+    button(ft, { text: tx('− عمود'), label: tx('حذف العمود'), run: (pe) => pe.chain().deleteColumn().run(), show: inTable, enabled: (pe) => can(pe, (c) => c.deleteColumn()) });
+    button(ft, { icon: 'table', text: tx('خطوط'), label: tx('إظهار خطوط الجدول'), run: (pe) => pe.toggleTableLines(), show: inTable,
       on: (pe) => !pe.editor.getAttributes('table').borderless });
-    popover(button(ft, { icon: 'paint-bucket', label: 'لون تعبئة الخلايا', run: () => {}, show: inTable }),
-      palette('بلا تعبئة', (pe, c) => pe.chain().setCellAttribute('backgroundColor', c).run()));
-    button(ft, { icon: 'trash', label: 'حذف الجدول', run: (pe) => pe.chain().deleteTable().run(), show: inTable });
+    popover(button(ft, { icon: 'paint-bucket', label: tx('لون تعبئة الخلايا'), run: () => {}, show: inTable }),
+      palette(tx('بلا تعبئة'), (pe, c) => pe.chain().setCellAttribute('backgroundColor', c).run()));
+    button(ft, { icon: 'trash', label: tx('حذف الجدول'), run: (pe) => pe.chain().deleteTable().run(), show: inTable });
 
     const onFig = when('figure');
-    [['right', 'text-align-right', 'الصورة لليمين'], ['center', 'text-align-center', 'الصورة في الوسط'], ['left', 'text-align-left', 'الصورة لليسار']].forEach(([a, ic, label]) => {
+    physical([['left', 'text-align-left', tx('الصورة لليسار')], ['center', 'text-align-center', tx('الصورة في الوسط')], ['right', 'text-align-right', tx('الصورة لليمين')]]).forEach(([a, ic, label]) => {
       button(ft, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), show: onFig });
     });
-    button(ft, { icon: 'crop', text: 'قص', label: 'قص الصورة', run: (pe) => { pe.cropPicture(); update(); }, on: (pe) => pe.cropping(), show: onFig });
+    button(ft, { icon: 'crop', text: tx('قص'), label: tx('قص الصورة'), run: (pe) => { pe.cropPicture(); update(); }, on: (pe) => pe.cropping(), show: onFig });
     // Word's Layout Options: how the text goes with the picture, and its width on the page
-    popover(button(ft, { icon: 'text-columns', text: 'التفاف', label: 'التفاف النص وحجم الصورة وإطارها', run: () => {}, show: onFig }), (pop) => {
+    popover(button(ft, { icon: 'text-columns', text: tx('التفاف'), label: tx('التفاف النص وحجم الصورة وإطارها'), run: () => {}, show: onFig }), (pop) => {
       const f = get().figure() || {}, w = Math.round(Math.min(1, f.wFrac || 0.5) * 100);
       const wrap = (label, v) => [label, (f.wrap || null) === v, (pe) => pe.setFigure({ wrap: v })];
-      menu(pop, [['التفاف النص'],
-        wrap('في السطر مع النص: تُسحب إلى أي مكان في الجملة', 'inline'),
-        wrap('مربّع: النص حول الصورة', 'square'),
-        wrap('ضيّق: النص قريب من الصورة', 'tight'),
-        wrap('عبر: النص يملأ ما حول الصورة', 'through'),
-        wrap('أعلى وأسفل: الصورة وحدها في سطرها', null),
-        wrap('خلف النص: تُسحب إلى أي مكان', 'behind'),
-        wrap('أمام النص: تُسحب إلى أي مكان', 'front'),
-        ['العرض من الصفحة'],
+      menu(pop, [[tx('التفاف النص')],
+        wrap(tx('في السطر مع النص: تُسحب إلى أي مكان في الجملة'), 'inline'),
+        wrap(tx('مربّع: النص حول الصورة'), 'square'),
+        wrap(tx('ضيّق: النص قريب من الصورة'), 'tight'),
+        wrap(tx('عبر: النص يملأ ما حول الصورة'), 'through'),
+        wrap(tx('أعلى وأسفل: الصورة وحدها في سطرها'), null),
+        wrap(tx('خلف النص: تُسحب إلى أي مكان'), 'behind'),
+        wrap(tx('أمام النص: تُسحب إلى أي مكان'), 'front'),
+        [tx('العرض من الصفحة')],
         ['chips', [25, 33, 50, 75, 100].map((p) => [p + '%', w === p, (pe) => pe.setFigure({ wFrac: p / 100 })])],
-        ['الإطار'],
-        ['chips', [[null, 'بلا إطار'], ['single', 'خط مفرد'], ['thick', 'خط سميك'], ['double', 'خط مزدوج'], ['dashed', 'خط متقطع'], ['dotted', 'خط منقّط']]
+        [tx('الإطار')],
+        ['chips', [[null, tx('بلا إطار')], ['single', tx('خط مفرد')], ['thick', tx('خط سميك')], ['double', tx('خط مزدوج')], ['dashed', tx('خط متقطع')], ['dotted', tx('خط منقّط')]]
           .map(([v, label]) => [label, (f.border || null) === v, (pe) => pe.setFigure({ border: v })])]]);
     });
-    button(ft, { icon: 'trash', text: 'حذف الصورة', label: 'حذف الصورة', run: (pe) => pe.chain().deleteSelection().run(), show: onFig });
+    button(ft, { icon: 'trash', text: tx('حذف الصورة'), label: tx('حذف الصورة'), run: (pe) => pe.chain().deleteSelection().run(), show: onFig });
 
     // above the selection, the table (or the top of the visible part of a tall one) or the picture; below when there is no room
     function place(pe, m) {

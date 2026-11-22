@@ -7,6 +7,7 @@ import subprocess
 from functools import lru_cache
 
 from .common import EngineError, Line, Word, drop_junk
+from messages import msg
 
 # Model folders (see README for the downloads). Linux packages usually ship the "fast" models,
 # so each choice points at its own folder. If a folder is missing, that choice shows as unavailable;
@@ -45,14 +46,14 @@ def _dir(model: str) -> str:
 
 def available(model: str, langs: str = LANGS) -> tuple[bool, str]:
     if not shutil.which("tesseract"):
-        return False, "Tesseract غير مثبت على الخادم"
+        return False, msg("Tesseract غير مثبت على الخادم")
     dir_ = _dir(model)
     if dir_ and not os.path.isdir(dir_):
-        return False, f"ملفات النموذج غير موجودة على الخادم: {dir_}"
+        return False, msg("ملفات النموذج غير موجودة على الخادم: {folder}", folder=dir_)
     need = set(langs.split("+"))
     have = _langs_in(dir_)
     if not need <= have:
-        return False, "اللغة العربية غير مثبتة لهذا النموذج: " + ", ".join(sorted(need - have))
+        return False, msg("اللغة العربية غير مثبتة لهذا النموذج: {missing}", missing=", ".join(sorted(need - have)))
     return True, ""
 
 
@@ -87,7 +88,7 @@ def _read(img, langs: str, dir_: str, psm: int) -> list[Line]:
     try:
         d = pytesseract.image_to_data(img, lang=langs, config=config, output_type=pytesseract.Output.DICT, timeout=180)
     except RuntimeError as e:  # timeout
-        raise EngineError("انتهت مهلة القراءة بـ Tesseract") from e
+        raise EngineError(msg("انتهت مهلة القراءة بـ Tesseract")) from e
 
     lines: dict = {}
     order = []
