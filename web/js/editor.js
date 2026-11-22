@@ -42,14 +42,20 @@
       parseHTML: (el) => (num ? +el.getAttribute('data-' + name) || 0 : el.getAttribute('data-' + name) || null),
       renderHTML: () => ({}),
     });
-    const a = { image: data('image'), w: data('w', true), h: data('h', true), wFrac: data('wfrac', true), border: data('border') };
+    // crop: { l, t, r, b }, the share of the picture cut off each side (Word's Crop), or null
+    const a = { image: data('image'), w: data('w', true), h: data('h', true), wFrac: data('wfrac', true), border: data('border'), crop: { default: null, renderHTML: () => ({}) } };
     return wide ? Object.assign(a, { align: data('align'), wrap: data('wrap'), x: data('x', true), y: data('y', true) }) : a;
   };
   const pct = (a) => Math.round(Math.min(1, a.wFrac || 0.5) * 1000) / 10 + '%';
 
   // How a picture is drawn in the page, a block one (Figure) or one in a line (InlineImage): a box with the picture
   // and two handles on its lower corners that resize it, as in Word (its height follows); a free one (behind or in
-  // front of the text) is dragged anywhere by the picture itself.
+  // front of the text) is dragged anywhere by the picture itself. Cropping (dom.toggleCrop) shows the whole picture
+  // with a frame over the part kept, whose edges and corners are dragged in; it ends with the button, Enter or Esc,
+  // or when the picture is no longer selected, and the picture keeps its scale (it gets smaller, as in Word).
+  const SIDES = ['l', 't', 'r', 'b'];
+  const cropOf = (a) => Object.assign({ l: 0, t: 0, r: 0, b: 0 }, a.crop || {});
+  const cut = (c) => SIDES.some((k) => c[k] > 0.001);
   function pictureView(src, inline) {
     return ({ node, getPos, editor }) => {
       const dom = document.createElement(inline ? 'span' : 'figure'); dom.className = inline ? 'fig-inline' : 'fig';
@@ -59,8 +65,12 @@
         const h = document.createElement('span'); h.className = 'fig-handle'; h.dataset.side = side; h.title = 'اسحب لتغيير حجم الصورة';
         return h;
       });
-      box.append(img, ...handles); dom.append(box);
-      let cur = node;
+      const frame = document.createElement('span'); frame.className = 'crop-frame';
+      ['l', 'r', 't', 'b', 'lt', 'rt', 'lb', 'rb'].forEach((e) => {
+        const h = document.createElement('span'); h.className = 'crop-handle'; h.dataset.edge = e; frame.append(h);
+      });
+      box.append(img, frame, ...handles); dom.append(box);
+      let cur = node, crop = null;  // crop: { l, t, r, b } while cropping
       const free = () => !inline && FREE_WRAPS.includes(cur.attrs.wrap);
       const side = () => !inline && SIDE_WRAPS.includes(cur.attrs.wrap) && cur.attrs.align !== 'center';  // a centred picture has no side
       // the width goes on the outer element when it is the one in the text's flow (beside the text, or in a line)
@@ -73,7 +83,21 @@
         if (img.getAttribute('src') !== src(a.image)) img.src = src(a.image);
         img.style.border = BORDERS[a.border] ? BORDERS[a.border] + ' #000' : '';
         dom.classList.toggle('framed', !!BORDERS[a.border]);
-        width(pct(a));
+        const c = crop || cropOf(a), sized = a.w > 0 && a.h > 0;
+        box.classList.toggle('cropping', !!crop);
+        box.classList.toggle('cropped', !crop && sized && cut(c));
+        if (crop) {  // the whole picture, at the scale it is shown, and the frame over the part kept
+          box.style.aspectRatio = sized ? a.w + ' / ' + a.h : '';
+          Object.assign(img.style, { position: '', left: '', top: '', width: '' });
+          Object.assign(frame.style, { left: c.l * 100 + '%', top: c.t * 100 + '%', right: c.r * 100 + '%', bottom: c.b * 100 + '%' });
+          width(Math.min(1, a.wFrac || 0.5) / Math.max(0.05, 1 - c.l - c.r) * 100 + '%');
+        } else {
+          const kw = 1 - c.l - c.r, kh = 1 - c.t - c.b, on = sized && cut(c);
+          box.style.aspectRatio = on ? a.w * kw + ' / ' + a.h * kh : '';
+          Object.assign(img.style, on ? { position: 'absolute', width: 100 / kw + '%', left: -c.l / kw * 100 + '%', top: -c.t / kh * 100 + '%' }
+            : { position: '', left: '', top: '', width: '' });
+          width(pct(a));
+        }
         place(a.x, a.y);  // a margin's % is of the width, as y is
       };
       paint();
@@ -107,9 +131,43 @@
           width((frac * 100).toFixed(1) + '%'); place(x, a.y);
         }, () => { if (frac !== a.wFrac) done(free() ? { wFrac: frac, x: +x.toFixed(4) } : { wFrac: frac }); });
       }));
+      // cropping: an edge or a corner takes its sides in or out, as a share of the whole picture
+      frame.addEventListener('pointerdown', (e) => {
+        const h = e.target.closest('.crop-handle');
+        if (!crop || !h || e.button !== 0) return;
+        const bw = box.clientWidth || 1, bh = box.clientHeight || 1, c0 = Object.assign({}, crop), edge = h.dataset.edge;
+        drag(e, (dx, dy) => {
+          const c = Object.assign({}, c0), fx = dx / bw, fy = dy / bh;
+          if (edge.includes('l')) c.l = c0.l + fx;
+          if (edge.includes('r')) c.r = c0.r - fx;
+          if (edge.includes('t')) c.t = c0.t + fy;
+          if (edge.includes('b')) c.b = c0.b - fy;
+          SIDES.forEach((k) => { c[k] = Math.max(0, c[k]); });
+          if (c.l + c.r > 0.95) { if (edge.includes('l')) c.l = 0.95 - c.r; else c.r = 0.95 - c.l; }
+          if (c.t + c.b > 0.95) { if (edge.includes('t')) c.t = 0.95 - c.b; else c.b = 0.95 - c.t; }
+          crop = c;
+          Object.assign(frame.style, { left: c.l * 100 + '%', top: c.t * 100 + '%', right: c.r * 100 + '%', bottom: c.b * 100 + '%' });
+        }, () => {});
+      });
+      const endCrop = () => {
+        if (!crop) return;
+        const a = cur.attrs, old = cropOf(a), c = crop, k = (x) => +x.toFixed(4);
+        crop = null;
+        const keep = Math.max(0.05, 1 - c.l - c.r) / Math.max(0.05, 1 - old.l - old.r);  // the same scale: narrower by what was cut
+        const same = SIDES.every((s) => Math.abs(c[s] - old[s]) < 0.0005);
+        if (same) { paint(); return; }
+        done({ crop: cut(c) ? { l: k(c.l), t: k(c.t), r: k(c.r), b: k(c.b) } : null, wFrac: +Math.max(0.02, (a.wFrac || 0.5) * keep).toFixed(3) });
+      };
+      dom.toggleCrop = () => {
+        if (crop) { endCrop(); return; }
+        if (!(cur.attrs.w > 0 && cur.attrs.h > 0)) return;
+        crop = cropOf(cur.attrs);
+        paint();
+      };
+      dom.cropping = () => !!crop;
       // behind or in front of the text: drag it anywhere, as in Word
       img.addEventListener('pointerdown', (e) => {
-        if (!free() || e.button !== 0) return;
+        if (!free() || crop || e.button !== 0) return;
         const W = dom.clientWidth || 1, a = cur.attrs, w = Math.min(1, a.wFrac || 0.5);
         let nx = a.x, ny = a.y;
         drag(e, (dx, dy) => {
@@ -121,8 +179,12 @@
       return {
         dom,
         update(n) { if (n.type !== cur.type) return false; cur = n; paint(); return true; },
-        // the handles, and a free picture, move by their own drag, not the editor's (which moves it in the text)
-        stopEvent: (e) => /^(pointer|mouse|drag)/.test(e.type) && (free() || !!(e.target.closest && e.target.closest('.fig-handle'))),
+        selectNode() { dom.classList.add('ProseMirror-selectednode'); },
+        // a crop in progress ends with the selection (after this update: no new step in the middle of one)
+        deselectNode() { dom.classList.remove('ProseMirror-selectednode'); if (crop) setTimeout(endCrop); },
+        // the handles, a picture being cropped and a free one move by their own drag, not the editor's (which moves
+        // it in the text)
+        stopEvent: (e) => /^(pointer|mouse|drag)/.test(e.type) && (free() || !!crop || !!(e.target.closest && e.target.closest('.fig-handle'))),
         ignoreMutation: () => true,
       };
     };
@@ -217,6 +279,19 @@
           renderHTML: (a) => (a.spaceBefore != null ? { 'data-sb': a.spaceBefore, style: 'margin-top:' + a.spaceBefore + 'pt' } : {}) },
         spaceAfter: { default: null, parseHTML: (el) => (el.dataset.sa != null ? +el.dataset.sa : null),
           renderHTML: (a) => (a.spaceAfter != null ? { 'data-sa': a.spaceAfter, style: 'margin-bottom:' + a.spaceAfter + 'pt' } : {}) },
+        // Word's paragraph borders: { top, bottom, left, right, between } each a line style (BORDERS); paragraphs in a
+        // row with the same borders are one box (the plugin below), with a line between them when 'between' is set
+        borders: { default: null,
+          parseHTML: (el) => { try { return el.dataset.bd ? JSON.parse(el.dataset.bd) : null; } catch (e) { return null; } },
+          renderHTML: (a) => {
+            const b = a.borders;
+            if (!b) return {};
+            const line = (s) => BORDERS[s] + ' currentColor';
+            const css = ['top', 'bottom', 'left', 'right'].filter((k) => BORDERS[b[k]])
+              .map((k) => 'border-' + k + ':' + line(b[k]) + ';padding-' + k + ':' + (k === 'top' || k === 'bottom' ? '.15em' : '.4em'));
+            if (BORDERS[b.between]) css.push('--bd-between:' + line(b.between));
+            return { 'data-bd': JSON.stringify(b), style: css.join(';') };
+          } },
       } }, { types: ['bulletList', 'orderedList'], attributes: { listStyle: {  // blocks-doc.js ls
         default: null,
         parseHTML: (el) => el.dataset.ls || null,
@@ -276,6 +351,28 @@
           return tr;
         },
       }), new T.Plugin({
+        // paragraphs in a row with the same borders are one box, as in Word: no line where they meet (or the
+        // 'between' line), and no gap
+        props: {
+          decorations(state) {
+            const decos = [];
+            const walk = (node, start) => {
+              let prev = null;
+              node.forEach((child, offset) => {
+                const at = start + offset, key = child.attrs && child.attrs.borders ? JSON.stringify(child.attrs.borders) : null;
+                if (key && prev && prev.key === key) {
+                  decos.push(T.Decoration.node(prev.at, prev.at + prev.node.nodeSize, { class: 'bd-joined' }),
+                    T.Decoration.node(at, at + child.nodeSize, { class: 'bd-join' }));
+                }
+                if (!child.isTextblock && !child.isAtom && child.childCount) walk(child, at + 1);
+                prev = { key, at, node: child };
+              });
+            };
+            walk(state.doc, 0);
+            return T.DecorationSet.create(state.doc, decos);
+          },
+        },
+      }), new T.Plugin({
         // a list item starts on the side of its first letter, as a Word paragraph does: an English item left to
         // right on an Arabic page, its marker on the left; an item with no letter yet, or one whose side was set by
         // hand (the direction button), keeps the side it has
@@ -324,6 +421,11 @@
       content: window.BlocksDoc.blocksToDoc(blocks),
       editorProps: {
         attributes: { dir: 'rtl', class: 'doc', spellcheck: 'false', role: 'textbox', 'aria-multiline': 'true', 'aria-label': 'نص الصفحة' },
+        // Enter or Esc ends cropping a picture (editor.js pictureView)
+        handleKeyDown: (view, e) => {
+          if ((e.key === 'Enter' || e.key === 'Escape') && el.docEditor && el.docEditor.cropping()) { el.docEditor.cropPicture(); return true; }
+          return false;
+        },
         handlePaste: (view, e) => {
           const files = pastedImages(e);
           if (!files.length || !opts.onPasteImage) return false;
@@ -428,6 +530,33 @@
         editor.view.focus();
       },
 
+      // the paragraphs in the selection: their borders as Word's Borders button sets them. kind: 'top' | 'bottom' |
+      // 'left' | 'right' (on, or off when every paragraph has it), 'outside' (a box), 'all' (a box and lines between),
+      // 'none', or 'style' (the lines they have, in this style)
+      borders() { const p = editor.state.selection.$from.parent; return p.isTextblock ? p.attrs.borders || null : null; },
+      setBorders(kind, style) {
+        const st = editor.state, tr = st.tr, { from, to } = st.selection, nodes = [];
+        st.doc.nodesBetween(from, to, (n, pos) => {
+          if (n.type.name === 'paragraph' || n.type.name === 'heading') { nodes.push([n, pos]); return false; }
+          return true;
+        });
+        const every = (side) => nodes.every(([n]) => n.attrs.borders && n.attrs.borders[side]);
+        const off = ['top', 'bottom', 'left', 'right'].includes(kind) && every(kind);
+        nodes.forEach(([n, pos]) => {
+          let b = Object.assign({}, n.attrs.borders || {});
+          if (kind === 'none') b = {};
+          else if (kind === 'outside' || kind === 'all') {
+            ['top', 'bottom', 'left', 'right'].forEach((k) => { b[k] = style; });
+            if (kind === 'all') b.between = style; else delete b.between;
+          } else if (kind === 'style') Object.keys(b).forEach((k) => { b[k] = style; });
+          else if (off) delete b[kind];
+          else b[kind] = style;
+          tr.setNodeMarkup(pos, null, Object.assign({}, n.attrs, { borders: Object.keys(b).length ? b : null }));
+        });
+        editor.view.dispatch(tr);
+        editor.view.focus();
+      },
+
       // the selected picture's wrap ('inline' for a picture in a line, the Figure wraps, or null) and width (wFrac)
       figure() {
         if (editor.isActive('inlineImage')) return Object.assign({}, editor.getAttributes('inlineImage'), { wrap: 'inline' });
@@ -438,7 +567,7 @@
         const st = editor.state, sel = st.selection, node = sel.node;
         if (!node || !['figure', 'inlineImage'].includes(node.type.name)) return;
         const pic = { image: node.attrs.image, w: node.attrs.w, h: node.attrs.h, wFrac: attrs.wFrac || node.attrs.wFrac,
-          border: 'border' in attrs ? attrs.border : node.attrs.border };
+          border: 'border' in attrs ? attrs.border : node.attrs.border, crop: node.attrs.crop };
         const select = (tr, pos) => { editor.view.dispatch(tr); editor.commands.setNodeSelection(pos); editor.view.focus(); };
         if (node.type.name === 'inlineImage') {
           if (!('wrap' in attrs) || attrs.wrap === 'inline') { focused().updateAttributes('inlineImage', { wFrac: pic.wFrac, border: pic.border }).run(); return; }
@@ -461,6 +590,13 @@
         if (FREE_WRAPS.includes(attrs.wrap) && !FREE_WRAPS.includes(a.wrap)) Object.assign(upd, this.freePlace(attrs.wrap, pic.wFrac, a.align));
         focused().updateAttributes('figure', upd).run();
       },
+      // Word's Crop for the selected picture: on, and off again (which keeps the crop)
+      cropPicture() {
+        const dom = editor.view.nodeDOM(editor.state.selection.from);
+        if (dom && dom.toggleCrop) dom.toggleCrop();
+        editor.view.focus();
+      },
+      cropping() { const dom = figureSelected() || editor.isActive('inlineImage') ? editor.view.nodeDOM(editor.state.selection.from) : null; return !!(dom && dom.cropping && dom.cropping()); },
       // where a picture turned free (behind or in front of the text) starts: where it stood, at the top
       freePlace(wrap, wFrac, align) {
         if (!FREE_WRAPS.includes(wrap)) return {};
@@ -823,6 +959,22 @@
     });
     button(align, { icon: 'arrows-left-right', label: 'اتجاه الفقرة: من اليسار (إنجليزي) أو من اليمين', run: (pe) => pe.toggleDir(),
       on: (pe) => pe.isLtr(), enabled: (pe) => !pe.editor.isActive('figure') });
+    // Word's Borders button for paragraphs; the line style chosen is kept for the next borders
+    let borderStyle = 'single';
+    popover(button(align, { icon: 'square-half-bottom', label: 'حدود الفقرة', run: () => {}, enabled: (pe) => !!pe.spacing(), on: (pe) => !!pe.borders() }), (pop) => {
+      const b = get().borders() || {};
+      const has = (k) => !!b[k];
+      const box = ['top', 'bottom', 'left', 'right'].every(has);
+      const side = (label, k) => [label, has(k), (pe) => pe.setBorders(k, borderStyle)];
+      menu(pop, [['الحدود'],
+        side('حد سفلي', 'bottom'), side('حد علوي', 'top'), side('حد أيمن', 'right'), side('حد أيسر', 'left'),
+        ['بلا حدود', !Object.keys(b).length, (pe) => pe.setBorders('none')],
+        ['كل الحدود (مع خط بين الفقرات)', box && has('between'), (pe) => pe.setBorders('all', borderStyle)],
+        ['الحدود الخارجية', box && !has('between'), (pe) => pe.setBorders('outside', borderStyle)],
+        ['نمط الخط'],
+        ['chips', [['single', 'مفرد'], ['thick', 'سميك'], ['double', 'مزدوج'], ['dashed', 'متقطع'], ['dotted', 'منقّط']].map(([v, label]) =>
+          [label, borderStyle === v, (pe) => { borderStyle = v; if (Object.keys(b).length) pe.setBorders('style', v); }])]]);
+    });
     // Word's line and paragraph spacing menu; 1.25 is what a paragraph has until it is given another
     popover(button(align, { icon: 'arrows-out-line-vertical', label: 'تباعد الأسطر والفقرات', run: () => {}, enabled: (pe) => !!pe.spacing() }), (pop) => {
       const sp = get().spacing() || {};
@@ -934,6 +1086,9 @@
     // undo); phones: the row and its sheet. The same buttons move between them, so their state stays one.
     const row = (...groups) => { const r = document.createElement('div'); r.className = 'tb-row'; r.append(...groups); return r; };
     let laidOut = null;
+    // phones: spacing and borders as named rows of their own in the paragraph's sheet (their icons alone say little)
+    const alignOwn = [...align.children], paraRows = group('tb-rows', document.createElement('div'));
+    const paraMore = alignOwn.filter((b) => ['تباعد الأسطر والفقرات', 'حدود الفقرة'].includes(b.getAttribute('aria-label')));
     const arrange = () => {
       const p = phone();
       if (p === laidOut) return;
@@ -941,12 +1096,13 @@
       if (p) {
         marks.replaceChildren(boldB, italB, undB, strikeB); colors.replaceChildren(colorB, markB, eraserB);
         dText.fill(part('نوع السطر والحجم', style), part('شكل الخط', marks), part('الألوان', colors));
-        dPara.fill(part('القوائم', list), part('المحاذاة والاتجاه', align));
+        align.replaceChildren(...alignOwn.filter((b) => !paraMore.includes(b))); paraRows.replaceChildren(...paraMore);
+        dPara.fill(part('القوائم', list), part('المحاذاة والاتجاه', align), part('التباعد والحدود', paraRows));
         ins.replaceChildren(...insOwn.filter((n) => n !== flagBtn)); again.replaceChildren(rereadBtn, eyeBtn); dMore.fill(ins, again);
         quick.replaceChildren(flagBtn, undoBtn, redoBtn, dText.d, dPara.d, dMore.d);  // flags first: they are the review
         bar.replaceChildren(quick);
       } else {
-        fmt.replaceChildren(...fmtOwn); ins.replaceChildren(...insOwn); again.replaceChildren(rereadBtn, eyeBtn); hist.replaceChildren(undoBtn, redoBtn);
+        fmt.replaceChildren(...fmtOwn); align.replaceChildren(...alignOwn); ins.replaceChildren(...insOwn); again.replaceChildren(rereadBtn, eyeBtn); hist.replaceChildren(undoBtn, redoBtn);
         bar.replaceChildren(row(style, fmt), row(list, align, ins, again, hist));
       }
     };
@@ -992,6 +1148,7 @@
     [['right', 'text-align-right', 'الصورة لليمين'], ['center', 'text-align-center', 'الصورة في الوسط'], ['left', 'text-align-left', 'الصورة لليسار']].forEach(([a, ic, label]) => {
       button(ft, { icon: ic, label, run: (pe) => pe.align(a), on: (pe) => pe.alignActive(a), show: onFig });
     });
+    button(ft, { icon: 'crop', text: 'قص', label: 'قص الصورة', run: (pe) => { pe.cropPicture(); update(); }, on: (pe) => pe.cropping(), show: onFig });
     // Word's Layout Options: how the text goes with the picture, and its width on the page
     popover(button(ft, { icon: 'text-columns', text: 'التفاف', label: 'التفاف النص وحجم الصورة وإطارها', run: () => {}, show: onFig }), (pop) => {
       const f = get().figure() || {}, w = Math.round(Math.min(1, f.wFrac || 0.5) * 100);

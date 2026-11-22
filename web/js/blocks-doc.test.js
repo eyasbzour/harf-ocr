@@ -85,3 +85,9 @@ test('a picture in a line, a framed free picture and a list item turned by hand 
   assert.deepStrictEqual(docToBlocks(blocksToDoc(blocks)), blocks);
   assert.strictEqual(blocksToDoc(blocks).content[2].content[0].attrs.dir, 'ltr');  // the hand-set side, not the Arabic letters'
 });
+
+test('paragraph borders survive the trip', () => {
+  const blocks = [{ type: 'p', bold: false, segs: [{ s: 'نص' }], bd: { top: 'single', bottom: 'single', left: 'single', right: 'single', between: 'single' } },
+    { type: 'h', bold: true, segs: [{ s: 'عنوان' }], bd: { bottom: 'double' } }];
+  assert.deepStrictEqual(docToBlocks(blocksToDoc(blocks)), blocks);
+});
