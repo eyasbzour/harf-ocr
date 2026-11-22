@@ -219,6 +219,28 @@ const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
   await clickAt(lines[1][4] + 3);
   check('turned back on, a click shows the line again', await page.isVisible('#linePop'));
 
+  // 10. a part of the preview goes into the text as a picture, as Select does on the page photo
+  await page.click('#linePickPara');
+  await page.waitForFunction(() => !document.querySelector('#lineCrop').classList.contains('hidden'), null, { timeout: 5000 }).catch(() => {});
+  const figs0 = await page.locator('#editor figure.fig').count();
+  await page.click('#linePickPart');
+  const cv = await page.$eval('#lineCrop', (c) => { const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, shown: c.shown }; });
+  const r0 = await page.$eval('#lineCrop', (c) => c.closest('.line-crop').getBoundingClientRect().toJSON());
+  const x0 = Math.max(cv.x, r0.x) + 10, y0 = Math.max(cv.y, r0.y) + 5;
+  const x1 = Math.min(cv.x + cv.w, r0.right) - 10, y1 = Math.min(cv.y + cv.h, r0.bottom) - 5;
+  await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x1, y1, { steps: 6 }); await page.mouse.up();
+  check('Select draws a box on the preview', await page.isVisible('#lineBox'));
+  await page.screenshot({ path: path.join(__dirname, 'shots', 'line-pick.png') });
+  await page.click('#linePickCopy');
+  check('Copy puts the part on the clipboard', await page.waitForFunction(() => /نُسخ الجزء/.test(document.body.textContent), null, { timeout: 4000 }).then(() => true, () => false));
+  const part = await page.evaluate(() => { const b = document.getElementById('lineBox').getBoundingClientRect(), c = document.getElementById('lineCrop').getBoundingClientRect(); return b.width / c.width; });
+  await page.click('#linePickInsert');
+  check('Insert puts it in the text as a picture', await page.waitForFunction((n) => document.querySelectorAll('#editor figure.fig').length === n + 1, figs0, { timeout: 8000 }).then(() => true, () => false));
+  const fig = await page.evaluate(() => { const f = [...document.querySelectorAll('#editor figure.fig')].pop(); return { w: +f.dataset.w, h: +f.dataset.h, wfrac: +f.dataset.wfrac }; });
+  const want = part * cv.shown.sw;  // the part's width on the read photo, in its pixels
+  check('the picture is the part selected, at full photo resolution', Math.abs(fig.w - want) / want < 0.05, JSON.stringify({ fig, want: Math.round(want) }));
+  check('the panel closes after inserting', !(await page.isVisible('#linePop')));
+
   check('no page errors', errors.length === 0, errors.join(' | '));
   await browser.close(); process.exit(fails ? 1 : 0);
 })().catch((e) => { console.log('CRASH', e.message.split('\n')[0]); process.exit(2); });

@@ -97,6 +97,36 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   }, [before, at]);
   check('after a reload: wrap, side, width, spacing and the list style', kept.wrap === 'square' && kept.align === 'end' && kept.w === '25%' && kept.lh === '2' && kept.sb === '12' && kept.ol, JSON.stringify(kept));
 
+  // ---- paragraph borders, as Word's Borders button
+  const bpara = `${pm} > p >> nth=${at}`;
+  await page.click(bpara);
+  const bmenu = async (row) => { await tb('حدود الفقرة').click(); await page.click(`.tb-pop :is(.menu-row, .menu-chip):has-text("${row}")`); };
+  await bmenu('حد سفلي');
+  const pb = (k) => page.$eval(bpara, (p, k) => { const c = getComputedStyle(p); return [c.borderTopStyle, c.borderBottomStyle, c.borderLeftStyle, c.borderRightStyle][k]; }, k);
+  check('a bottom border', await pb(1) === 'solid' && await pb(0) === 'none');
+  await bmenu('مزدوج');
+  check('the line style applies to the borders it has', await pb(1) === 'double');
+  await bmenu('حد سفلي');
+  check('the bottom border again takes it away', await pb(1) === 'none');
+  // two paragraphs next to each other selected: one box around both
+  const two = await page.$$eval(`${pm} > p`, (ns) => ns.findIndex((n, i) => ns[i + 1] && n.nextElementSibling === ns[i + 1] && n.textContent.trim() && ns[i + 1].textContent.trim()));
+  await page.evaluate((k) => {
+    const pe = document.querySelector('#editor').docEditor, ps = document.querySelectorAll('#editor .ProseMirror > p');
+    const v = pe.editor.view, a = v.posAtDOM(ps[k], 0), b = v.posAtDOM(ps[k + 1], ps[k + 1].childNodes.length);
+    pe.editor.commands.setTextSelection({ from: a, to: b });
+  }, two);
+  await bmenu('الحدود الخارجية');
+  const box2 = await page.evaluate((k) => {
+    const ps = document.querySelectorAll('#editor .ProseMirror > p'), a = getComputedStyle(ps[k]), b = getComputedStyle(ps[k + 1]);
+    return { aTop: a.borderTopStyle, aBottom: a.borderBottomStyle, bTop: b.borderTopStyle, bBottom: b.borderBottomStyle, gap: ps[k + 1].getBoundingClientRect().top - ps[k].getBoundingClientRect().bottom };
+  }, two);
+  check('Outside Borders: one box around both paragraphs', box2.aTop === 'double' && box2.aBottom === 'none' && box2.bTop === 'none' && box2.bBottom === 'double' && Math.abs(box2.gap) < 1, JSON.stringify(box2));
+  await bmenu('كل الحدود');
+  check('All Borders: a line between them too', await page.evaluate((k) => getComputedStyle(document.querySelectorAll('#editor .ProseMirror > p')[k + 1]).borderTopStyle, two) === 'double');
+  await bmenu('بلا حدود');
+  check('No Border takes them all away', await page.evaluate((k) => [...document.querySelectorAll('#editor .ProseMirror > p')].slice(k, k + 2).every((p) => !p.dataset.bd), two));
+  await bmenu('حد علوي');
+
   // ---- the direction button moves a list item's marker to the other side, and that sticks
   await page.click(`${pm} > ol[data-ls="hindi"] > li >> nth=0`);
   await tb('اتجاه الفقرة: من اليسار (إنجليزي) أو من اليمين').click();
@@ -154,6 +184,24 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const b2 = await box();
   check('after a reload it is where it was dropped, the same size, framed', Math.abs(b2.x - b1.x) < 3 && Math.abs(b2.y - b1.y) < 3 && Math.abs(b2.w - b1.w) < 3
     && await page.$eval(`${pm} figure.fig[data-wrap="front"] img`, (i) => getComputedStyle(i).borderTopStyle === 'double'), JSON.stringify(b2));
+
+  // ---- cropping, as in Word: drag the frame's left edge in, then end it; the picture keeps its scale
+  const front = `${pm} figure.fig[data-wrap="front"]`;
+  await page.$eval(`${front} .fig-box`, (b) => b.scrollIntoView({ block: 'center' }));
+  await page.locator(`${front} img`).click();
+  const before0 = await box();
+  await page.locator('.tb-float button[aria-label="قص الصورة"]').click();
+  check('Crop shows the frame to drag', await until(() => !!document.querySelector('#editor .fig-box.cropping .crop-frame')));
+  const lh = await page.$eval(`${front} .crop-handle[data-edge="l"]`, (h) => { const r = h.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(lh.x, lh.y); await page.mouse.down(); await page.mouse.move(lh.x + before0.w * 0.3, lh.y, { steps: 6 }); await page.mouse.up();
+  await page.locator('.tb-float button[aria-label="قص الصورة"]').click();
+  const after0 = await box();
+  check('cropped: 30% less wide, the same height, its left part gone', await until(() => !!document.querySelector('#editor .fig-box.cropped'))
+    && Math.abs(after0.w - before0.w * 0.7) < 4 && Math.abs(after0.h - before0.h) < 4, JSON.stringify({ before0, after0 }));
+  await page.click('#btnSave'); await page.waitForFunction(() => document.getElementById('saveState').textContent === 'محفوظ');
+  await page.reload(); await page.waitForSelector('#editor .ProseMirror p');
+  const kept0 = await box();
+  check('the crop is kept after a reload', Math.abs(kept0.w - after0.w) < 4 && Math.abs(kept0.h - after0.h) < 4, JSON.stringify(kept0));
 
   check('no page errors', errors.length === 0, errors.join(' | '));
   await browser.close();

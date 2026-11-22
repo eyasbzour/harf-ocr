@@ -354,6 +354,57 @@
     const s = selFor; closeSelSheet(false);
     if (s.value !== v) { s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }
   }
+  // phones: a sheet goes away when pulled down, by its top or, when it is scrolled to its top, by anything in it.
+  // Not too short a pull, unless a quick flick; less than that and it springs back.
+  const SHEETS = '.pop, .note-pop, .tb-pop, .sel-sheet, #readBar, dialog:not(#dlgImage)';
+  function initSheetDrag() {
+    let d = null;
+    const scroller = (el) => (el.tagName === 'DIALOG' ? el.querySelector('.dlg-body') || el.querySelector('.dlg') : el);
+    document.addEventListener('touchstart', (e) => {
+      d = null;
+      if (!sheets() || e.touches.length !== 1) return;
+      const t = e.touches[0], el = e.target.closest && e.target.closest(SHEETS);
+      if (!el || (el.tagName !== 'DIALOG' && getComputedStyle(el).position !== 'fixed')) return;
+      if (e.target.closest('input, textarea, select, [contenteditable="true"], .tbl-grid, .line-crop')) return;
+      const top = t.clientY - el.getBoundingClientRect().top < 56;  // the grabber and the title
+      const sc = scroller(el);
+      if (!top && sc && sc.scrollTop > 0) return;
+      d = { el, y0: t.clientY, t0: e.timeStamp, dy: 0, top, sc };
+    }, { passive: true, capture: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!d) return;
+      const dy = e.touches[0].clientY - d.y0;
+      if (!d.dy && (dy < 0 || (!d.top && d.sc && d.sc.scrollTop > 0))) { d = null; return; }  // a scroll, not a pull
+      if (dy <= 0 && !d.dy) return;
+      e.preventDefault();
+      d.dy = Math.max(0, dy);
+      d.el.classList.add('sheet-pulled');
+      d.el.style.transform = `translateY(${d.dy}px)`;
+    }, { passive: false, capture: true });
+    const end = (e) => {
+      if (!d) return;
+      const { el, dy, t0 } = d; d = null;
+      if (dy < 4) { el.classList.remove('sheet-pulled'); el.style.transform = ''; return; }
+      const flick = dy / Math.max(1, e.timeStamp - t0) > 0.5;
+      if (dy > Math.min(140, el.offsetHeight * 0.3) || flick) { dismissSheet(el, dy); return; }
+      el.classList.remove('sheet-pulled');
+      el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 260, easing: 'cubic-bezier(.32, .72, 0, 1)' });
+      el.style.transform = '';
+    };
+    document.addEventListener('touchend', end, true); document.addEventListener('touchcancel', end, true);
+  }
+  // a window closes as on its Esc; the others as on Esc, sliding on from where the finger left them
+  function dismissSheet(el, dy) {
+    el.classList.remove('sheet-pulled');
+    const out = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(100%)' }],
+      { duration: 220, easing: 'cubic-bezier(.32, .72, 0, 1)', fill: 'forwards' });
+    out.onfinish = () => {
+      if (el.tagName === 'DIALOG') { if (el.dispatchEvent(new Event('cancel', { cancelable: true }))) el.close(); }
+      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      el.style.transform = ''; el.classList.add('sheet-gone');
+      setTimeout(() => { out.cancel(); el.classList.remove('sheet-gone'); }, 320);  // after its own slide-out, if any
+    };
+  }
   function initSelSheets() {
     let touch = null;
     // the phone's own list opens on the tap: the press is taken here, and the sheet opens when the finger lifts in place
@@ -1104,6 +1155,7 @@
       cv.width = Math.round(Math.min(640, sw * 2)); cv.height = Math.round(cv.width * sh / sw);
     }
     cv.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    cv.shown = { sx, sy, sw, sh };  // what part of the read photo it shows (lineCut)
     cv.classList.remove('hidden');
     return true;
   }
@@ -1158,11 +1210,12 @@
     for (const k of ['line', 'para', 'row']) $('linePick' + k[0].toUpperCase() + k.slice(1)).setAttribute('aria-pressed', String(at.which === k));
     $('lineResult').classList.add('hidden');
     at.result = null;
-    const wrap = $('lineCrop').parentElement;
+    const wrap = $('lineCrop').closest('.line-crop');
     wrap.dir = at.t.ltr ? 'ltr' : 'rtl';  // scrolled to where the line starts
     wrap.classList.remove('hidden');      // its width sizes the picture
+    clearLinePart();
     drawCrop($('lineCrop'), tg.box, () => lineAt === at && at.t[at.which] === tg, tg.lineH).then((ok) => {
-      wrap.classList.toggle('hidden', !ok);
+      wrap.classList.toggle('hidden', !ok); $('linePick').classList.toggle('hidden', !ok);
       wrap.scrollLeft = 0; wrap.scrollTop = 0;
       placeLine();
     });
@@ -1213,8 +1266,73 @@
     closeLine(); syncEditor(); renderFlags(); renderPages(); markDirty();
     pe.focus();
   }
+  // the preview as a picture in the text: the part dragged around while تحديد is on, or all of it. The part is
+  // kept as fractions of the preview, and cut from the read photo at its full resolution.
+  let linePart = null;  // { x0, y0, x1, y1 }
+  function setLinePicking(on) {
+    $('linePickPart').setAttribute('aria-pressed', String(on));
+    $('lineCrop').closest('.line-crop').classList.toggle('picking', on);
+    if (!on) clearLinePart();
+  }
+  function clearLinePart() { linePart = null; $('lineBox').classList.add('hidden'); }
+  function placeLinePart() {
+    const cv = $('lineCrop'), b = $('lineBox'), w = cv.offsetWidth, h = cv.offsetHeight;
+    Object.assign(b.style, { left: cv.offsetLeft + linePart.x0 * w + 'px', top: cv.offsetTop + linePart.y0 * h + 'px', width: (linePart.x1 - linePart.x0) * w + 'px', height: (linePart.y1 - linePart.y0) * h + 'px' });
+    b.classList.remove('hidden');
+  }
+  function lineCut() {
+    const cv = $('lineCrop'), s = cv.shown, src = cropSrc.canvas;
+    if (!s || !src || cv.classList.contains('hidden')) return null;
+    const k = linePart || { x0: 0, y0: 0, x1: 1, y1: 1 };
+    const sx = s.sx + k.x0 * s.sw, sy = s.sy + k.y0 * s.sh, sw = (k.x1 - k.x0) * s.sw, sh = (k.y1 - k.y0) * s.sh;
+    const f = Math.min(1, 3000 / Math.max(sw, sh)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(sw * f)); c.height = Math.max(1, Math.round(sh * f));
+    c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return { canvas: c, wFrac: sw / src.width };
+  }
+  async function insertLinePart() {
+    const cut = lineCut(); if (!cut) return;
+    const blob = await new Promise((res) => cut.canvas.toBlob(res, 'image/jpeg', 0.92));
+    try { await insertFigure(blob, cut.wFrac); closeLine(); syncEditor(); markDirty(); } catch (e) { toast(e.message, true); }
+  }
+  function copyLinePart() {
+    const cut = lineCut(); if (!cut) return;
+    if (!navigator.clipboard || !window.ClipboardItem) { toast('لا يسمح هذا المتصفح بنسخ الصور.', true); return; }
+    const png = new Promise((res) => cut.canvas.toBlob(res, 'image/png'));  // made with the click (Safari)
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+      .then(() => toast('نُسخ الجزء. الصقه في النص أو في أي برنامج (Ctrl+V).'), () => toast('تعذر النسخ.', true));
+  }
+  function initLinePick() {
+    // no toast for the hint (its title has it): on a phone a toast would sit over the sheet's buttons
+    $('linePickPart').onclick = () => setLinePicking($('linePickPart').getAttribute('aria-pressed') !== 'true');
+    $('linePickInsert').onclick = insertLinePart;
+    $('linePickCopy').onclick = copyLinePart;
+    const shot = $('lineCrop').parentElement;
+    // a finger drawing the box is only that: the browser starts no gesture of its own (which would swallow the
+    // next tap, on Insert)
+    shot.addEventListener('touchmove', (e) => { if ($('linePickPart').getAttribute('aria-pressed') === 'true') e.preventDefault(); }, { passive: false });
+    shot.addEventListener('pointerdown', (e) => {
+      if ($('linePickPart').getAttribute('aria-pressed') !== 'true' || e.button !== 0) return;
+      const r = $('lineCrop').getBoundingClientRect();
+      if (!r.width) return;
+      e.preventDefault(); shot.setPointerCapture(e.pointerId);
+      const fx = (ev) => Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), fy = (ev) => Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
+      const x = fx(e), y = fy(e), drag = new AbortController();
+      linePart = { x0: x, y0: y, x1: x, y1: y };
+      shot.addEventListener('pointermove', (ev) => {
+        linePart = { x0: Math.min(x, fx(ev)), x1: Math.max(x, fx(ev)), y0: Math.min(y, fy(ev)), y1: Math.max(y, fy(ev)) };
+        placeLinePart();
+      }, { signal: drag.signal });
+      const up = () => {
+        drag.abort();
+        if ((linePart.x1 - linePart.x0) * r.width < 8 || (linePart.y1 - linePart.y0) * r.height < 8) clearLinePart();  // a click, not a drag
+      };
+      shot.addEventListener('pointerup', up, { signal: drag.signal }); shot.addEventListener('pointercancel', up, { signal: drag.signal });
+    });
+  }
   function closeLine() {
     lineAt = null;
+    setLinePicking(false);
     slideOut($('linePop'), () => $('linePop').classList.add('hidden'));
   }
 
@@ -1653,6 +1771,8 @@
     placeForPhone();
     window.addEventListener('resize', () => { placeForPhone(); if (!sheets()) { document.body.classList.remove('read-open'); closeSelSheet(false); } });
     initSelSheets();
+    initSheetDrag();
+    initLinePick();
     $('btnReadSheet').onclick = () => setReadSheet(!document.body.classList.contains('read-open'));
     document.addEventListener('pointerup', (e) => { if (onDim(e)) closePops(e); });
 

@@ -107,7 +107,19 @@
       return out;
     }
 
-    // o: { bold, size, color, keepNext, before, after, line, align, indent, hanging, indBoth, num: { id, lvl }, lit, outline }
+    // a paragraph's borders (blocks-doc.js bd) as Word's: [w:val, w:sz in eighths of a point]
+    var PARA_LINES = { single: ['single', 4], thick: ['single', 18], double: ['double', 4], dashed: ['dashed', 4], dotted: ['dotted', 4] };
+    function pBdr(bd) {
+      if (!bd) return '';
+      var one = function (tag, s, space) {
+        var v = PARA_LINES[s];
+        return v ? '<w:' + tag + ' w:val="' + v[0] + '" w:sz="' + v[1] + '" w:space="' + space + '" w:color="auto"/>' : '';
+      };
+      // in a right-to-left paragraph Word's left and right are the page's own, as the editor draws them
+      var x = one('top', bd.top, 1) + one('left', bd.left, 4) + one('bottom', bd.bottom, 1) + one('right', bd.right, 4) + one('between', bd.between, 1);
+      return x ? '<w:pBdr>' + x + '</w:pBdr>' : '';
+    }
+    // o: { bold, size, color, keepNext, before, after, line, align, indent, hanging, indBoth, num: { id, lvl }, lit, outline, bd }
     // (lit: a list number written as text)
     // (line: Word's line spacing in 240ths of a line)
     function para(segs, o) {
@@ -116,7 +128,7 @@
       var ind = o.num ? '' : o.indent ? '<w:ind w:start="' + o.indent + '" w:hanging="' + (o.hanging || 0) + '"/>'
         : o.indBoth ? '<w:ind w:start="' + o.indBoth + '" w:end="' + o.indBoth + '"/>' : '';
       var pPr = '<w:pPr>' + (o.keepNext ? '<w:keepNext/>' : '') +
-        (o.num ? '<w:numPr><w:ilvl w:val="' + o.num.lvl + '"/><w:numId w:val="' + o.num.id + '"/></w:numPr>' : '') + (rtlBlock ? '<w:bidi/>' : '') +
+        (o.num ? '<w:numPr><w:ilvl w:val="' + o.num.lvl + '"/><w:numId w:val="' + o.num.id + '"/></w:numPr>' : '') + pBdr(o.bd) + (rtlBlock ? '<w:bidi/>' : '') +
         '<w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '" w:line="' + (o.line || 300) + '" w:lineRule="auto"/>' +
         ind + '<w:jc w:val="' + (o.align || 'both') + '"/>' + (o.outline != null ? '<w:outlineLvl w:val="' + o.outline + '"/>' : '') + '</w:pPr>';
       var lit = o.lit ? '<w:r>' + rPr({ b: o.bold, sz: o.size || size }, true) + '<w:t>' + esc(o.lit) + '</w:t><w:tab/></w:r>' : '';
@@ -236,7 +248,11 @@
       var n = images.length + 1, rid = 'rIdDsImg' + n, id = 9000 + n;
       images.push({ rid: rid, name: bk.image, part: 'media/ds-img-' + n + '.jpeg' });
       var cx = Math.round(Math.min(1, bk.wFrac || 0.5) * textWidth * 635);  // twips -> EMU
-      var cy = Math.round(cx * (bk.h || 1) / (bk.w || 1));
+      // a cropped picture: what is left of it, at its width (Word's srcRect cuts the rest, in thousandths of a percent)
+      var cr = bk.crop || {}, kw = 1 - (cr.l || 0) - (cr.r || 0), kh = 1 - (cr.t || 0) - (cr.b || 0);
+      var cy = Math.round(cx * (bk.h || 1) * kh / ((bk.w || 1) * kw));
+      var src = bk.crop ? '<a:srcRect l="' + Math.round((cr.l || 0) * 1e5) + '" t="' + Math.round((cr.t || 0) * 1e5) + '" r="' + Math.round((cr.r || 0) * 1e5) +
+        '" b="' + Math.round((cr.b || 0) * 1e5) + '"/>' : '';
       var maxH = 0.85 * textHeight * 635;  // taller than a page would push it, and the lines kept with it, to the next page
       if (cy > maxH) { cx = Math.round(cx * maxH / cy); cy = Math.round(maxH); }
       var ext = 'cx="' + cx + '" cy="' + cy + '"';
@@ -244,7 +260,7 @@
         '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="' + A_NS + '" noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
         '<a:graphic xmlns:a="' + A_NS + '"><a:graphicData uri="' + PIC_NS + '"><pic:pic xmlns:pic="' + PIC_NS + '">' +
         '<pic:nvPicPr><pic:cNvPr id="' + id + '" name="' + esc(bk.image) + '"/><pic:cNvPicPr/></pic:nvPicPr>' +
-        '<pic:blipFill><a:blip xmlns:r="' + R_NS + '" r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+        '<pic:blipFill><a:blip xmlns:r="' + R_NS + '" r:embed="' + rid + '"/>' + src + '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
         '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext ' + ext + '/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' + (LINES[bk.border] || '') + '</pic:spPr>' +
         '</pic:pic></a:graphicData></a:graphic>';
       if (!wrap) {
@@ -275,6 +291,7 @@
       if (bk.lh) o.line = Math.round(240 * bk.lh);
       if (bk.sb != null) o.before = Math.round(bk.sb * 20);
       if (bk.sa != null) o.after = Math.round(bk.sa * 20);
+      if (bk.bd) o.bd = bk.bd;
       return o;
     }
     function blockXml(bk, al) {

@@ -14,10 +14,13 @@
  *   ls: a list's style (li: 'circle' | 'square' | 'diamond' | 'arrow' | 'check'; ol: 'hindi' | 'alpha-ar' | 'lower' |
  *   'upper' | 'roman' | 'paren'); none is the plain bullet or 1. 2. 3.
  *   lh: line spacing (1 = single, as Word counts it); sb / sa: space before / after the paragraph, in points.
+ *   bd: the paragraph's borders, { top?, bottom?, left?, right?, between? } each 'single' | 'thick' | 'double' |
+ *   'dashed' | 'dotted'; paragraphs in a row with the same borders make one box.
  *   img: a picture; wrap (Word's Layout Options): 'square' | 'tight' | 'through' (the text flows around it),
  *   'behind' | 'front' (placed freely: x, y in fractions of the page width, from the text's left edge and from its place
  *   in the text), none: it stands on its own lines. border: 'single' | 'thick' | 'double' | 'dashed' | 'dotted'.
- *   A seg { s: '', img: { image, w, h, wFrac, border? } } is a picture in a line.
+ *   crop: { l, t, r, b }, the share cut off each side (wFrac is the width of what is left).
+ *   A seg { s: '', img: { image, w, h, wFrac, border?, crop? } } is a picture in a line.
  *   fixedDir (li / ol): the item's side was set by hand (dir), so its first letter does not decide it.
  * The editor's document is Tiptap / ProseMirror JSON (paragraph, heading, bulletList, orderedList, table, figure).
  * Works in the browser (window.BlocksDoc) and in Node (require) for testing.
@@ -64,7 +67,7 @@
   function inline(segs, bold) {
     var out = [];
     (segs || []).forEach(function (sg) {
-      if (sg.img) { out.push({ type: 'inlineImage', attrs: { image: sg.img.image, w: sg.img.w || 0, h: sg.img.h || 0, wFrac: sg.img.wFrac || 0.5, border: sg.img.border || null } }); return; }
+      if (sg.img) { out.push({ type: 'inlineImage', attrs: { image: sg.img.image, w: sg.img.w || 0, h: sg.img.h || 0, wFrac: sg.img.wFrac || 0.5, border: sg.img.border || null, crop: sg.img.crop || null } }); return; }
       var marks = [];
       FORMAT.forEach(function (f) { if (sg[f[0]] || (f[0] === 'b' && bold)) marks.push({ type: f[1] }); });
       if (sg.c || sg.bg || sg.sz) {
@@ -87,6 +90,7 @@
     if (b.lh) n.attrs.lineHeight = b.lh;
     if (b.sb != null) n.attrs.spaceBefore = b.sb;
     if (b.sa != null) n.attrs.spaceAfter = b.sa;
+    if (b.bd) n.attrs.borders = b.bd;
     var content = inline(segs, bold);
     if (content.length) n.content = content;
     return n;
@@ -140,7 +144,7 @@
           return { type: 'tableRow', content: cells };
         }) });
       } else if (b.type === 'img') {
-        out.push({ type: 'figure', attrs: { image: b.image, w: b.w || 0, h: b.h || 0, wFrac: b.wFrac || 0.5, align: b.align || null, wrap: b.wrap || null, x: b.x || 0, y: b.y || 0, border: b.border || null } });
+        out.push({ type: 'figure', attrs: { image: b.image, w: b.w || 0, h: b.h || 0, wFrac: b.wFrac || 0.5, align: b.align || null, wrap: b.wrap || null, x: b.x || 0, y: b.y || 0, border: b.border || null, crop: b.crop || null } });
       } else out.push(textNode('paragraph', b, b.segs, b.bold));
     });
     flush();
@@ -168,6 +172,7 @@
       if (n.type === 'inlineImage') {
         var ia = n.attrs || {}, im = { image: ia.image, w: ia.w, h: ia.h, wFrac: ia.wFrac };
         if (ia.border) im.border = ia.border;
+        if (ia.crop) im.crop = ia.crop;
         pushSeg(segs, { s: '', img: im });
         return;
       }
@@ -211,6 +216,7 @@
     if (node && node.attrs && node.attrs.lineHeight) b.lh = +node.attrs.lineHeight;
     if (node && node.attrs && node.attrs.spaceBefore != null) b.sb = +node.attrs.spaceBefore;
     if (node && node.attrs && node.attrs.spaceAfter != null) b.sa = +node.attrs.spaceAfter;
+    if (node && node.attrs && node.attrs.borders) b.bd = node.attrs.borders;
     return b;
   }
 
@@ -253,6 +259,7 @@
         if (a.wrap) img.wrap = a.wrap;
         if (a.wrap === 'behind' || a.wrap === 'front') { img.x = a.x || 0; img.y = a.y || 0; }
         if (a.border) img.border = a.border;
+        if (a.crop) img.crop = a.crop;
         out.push(img);
       } else if (n.type === 'table') {
         var fills = [], anyFill = false, places = [], anyPlace = false;

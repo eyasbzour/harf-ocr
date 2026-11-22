@@ -533,7 +533,15 @@
   </div>
   <p class="line-why hidden" id="lineWhy"></p>
   <div class="line-body" id="lineBody">
-    <div class="line-crop"><canvas id="lineCrop" class="hidden" role="img" aria-label="الموضع في صورة الصفحة"></canvas></div>
+    <div class="line-crop"><div class="line-shot"><canvas id="lineCrop" class="hidden" role="img" aria-label="الموضع في صورة الصفحة"></canvas><span class="line-box hidden" id="lineBox"></span></div></div>
+    <!-- a part of what is shown (or all of it) as a picture in the text, as Select does on the page photo -->
+    <div class="line-pick" id="linePick" role="toolbar" aria-label="الصورة المعروضة">
+      <button class="btn ghost small" id="linePickPart" type="button" aria-pressed="false" title="اسحب على الصورة حول الجزء المطلوب">
+        <svg class="i" aria-hidden="true"><use href="vendor/icons.svg#selection"/></svg><span>تحديد</span>
+      </button>
+      <button class="btn ghost small" id="linePickCopy" type="button"><svg class="i" aria-hidden="true"><use href="vendor/icons.svg#copy"/></svg><span>نسخ</span></button>
+      <button class="btn ghost small" id="linePickInsert" type="button"><svg class="i" aria-hidden="true"><use href="vendor/icons.svg#images"/></svg><span>إدراج في النص</span></button>
+    </div>
     <div class="note-reread">
       <select id="lineEngine" aria-label="القارئ"></select>
       <button class="btn ghost small" id="lineReadBtn" type="button">

@@ -139,3 +139,12 @@ test("Word's layout options, picture borders and a picture in a line reach Word"
   assert.ok(doc.includes('<wp:posOffset>' + Math.round(0.5 * tw * 635) + '</wp:posOffset>'));
   assert.ok(doc.includes('<wp:wrapTight wrapText="bothSides"><wp:wrapPolygon') && doc.includes('<a:prstDash val="dash"/>'));
 });
+
+test('paragraph borders reach Word', async () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '../../templates/plain.docx'));
+  const blocks = [{ type: 'p', segs: [{ s: 'نص' }], bd: { bottom: 'double', left: 'thick', between: 'dashed' } }];
+  const zip = await JSZip.loadAsync(await DocxExport.build(tpl, { pages: [{ blocks }] }, { JSZip }));
+  const doc = await zip.file('word/document.xml').async('string');
+  assert.ok(doc.includes('<w:pBdr><w:left w:val="single" w:sz="18" w:space="4" w:color="auto"/><w:bottom w:val="double" w:sz="4" w:space="1" w:color="auto"/>' +
+    '<w:between w:val="dashed" w:sz="4" w:space="1" w:color="auto"/></w:pBdr><w:bidi/>'));
+});

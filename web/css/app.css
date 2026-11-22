@@ -33,6 +33,7 @@
   --shadow-2: 0 0 0 .5px oklch(20% 0.01 255 / .12), 0 4px 12px oklch(20% 0.01 255 / .08), 0 18px 44px oklch(20% 0.01 255 / .16);
   --shadow-page: 0 0 0 .5px oklch(20% 0.01 255 / .08), 0 1px 3px oklch(20% 0.01 255 / .1), 0 10px 30px oklch(20% 0.01 255 / .1);
   --r-ctl: 7px;
+  --r-sheet: 16px;  /* a phone's sheets (their top corners) */
   --r-panel: 12px;
   --ease: cubic-bezier(.22, 1, .36, 1);
   --font: "Segoe UI", "Noto Sans Arabic", Tahoma, system-ui, sans-serif;
@@ -438,6 +439,8 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
   border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow-2); animation: pop-in .12s var(--ease);
 }
 .tb-float[hidden] { display: none; }
+.tb-float { max-width: calc(100% - 8px); overflow-x: auto; scrollbar-width: none; }  /* one row, however narrow the page */
+.tb-float .tb { flex: none; white-space: nowrap; }
 .tb-size { width: 5.25rem; min-height: 2rem; padding-block: .1rem; font-size: var(--fs-sm); }
 .field-row { display: flex; gap: .6rem; align-items: end; }
 .field-row .field:not(.grow) { width: 6.5rem; flex-shrink: 0; }
@@ -496,6 +499,9 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 .doc ul, .doc ol { margin: 0 0 .35rem; padding: 0; }
 .doc li { margin-inline-start: 1.75rem; }
 .doc li > p { margin: 0; text-align: start; }
+/* paragraphs in a row with the same borders: one box (editor.js), a line between them only when the borders say so */
+.doc .bd-joined { border-bottom: 0 !important; margin-bottom: 0 !important; padding-bottom: 0 !important; }
+.doc .bd-join { border-top: var(--bd-between, 0) !important; margin-top: 0 !important; }
 .doc ul ul { list-style-type: circle; }
 .doc ol ol { list-style-type: arabic-indic; }
 /* the list styles (editor.js BULLETS / NUMBERS; docx-export.js has them for Word) */
@@ -542,6 +548,31 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 .doc .fig-handle[data-side="left"] { left: -6px; cursor: nesw-resize; }
 .doc .fig-handle[data-side="right"] { right: -6px; cursor: nwse-resize; }
 .doc .ProseMirror-selectednode .fig-handle { display: block; }
+@media (pointer: coarse) {  /* a finger's size */
+  .doc .fig-handle { width: 22px; height: 22px; bottom: -11px; }
+  .doc .fig-handle[data-side="left"] { left: -11px; } .doc .fig-handle[data-side="right"] { right: -11px; }
+}
+/* cropped: only the part kept shows (editor.js sets the box's shape and where the picture sits in it) */
+.doc .fig-box.cropped { overflow: hidden; }
+.doc .fig-box.cropped img { max-width: none; }
+/* cropping, as in Word: the whole picture, dimmed outside the frame of the part kept, with dark bars to drag */
+.doc .crop-frame { display: none; }
+.doc .fig-box.cropping { overflow: hidden; }
+.doc .fig-box.cropping .fig-handle { display: none !important; }
+.doc .fig-box.cropping .crop-frame { display: block; position: absolute; z-index: 3; box-shadow: 0 0 0 100vmax oklch(18% 0.01 255 / .5); outline: 1px solid #fff; }
+.doc .crop-handle { position: absolute; background: oklch(18% 0.01 255); border: 1.5px solid #fff; touch-action: none; }
+.doc .crop-handle:is([data-edge="l"], [data-edge="r"]) { top: 50%; width: 7px; height: 22px; margin-top: -11px; cursor: ew-resize; }
+.doc .crop-handle:is([data-edge="t"], [data-edge="b"]) { left: 50%; width: 22px; height: 7px; margin-left: -11px; cursor: ns-resize; }
+.doc .crop-handle[data-edge="l"] { left: -1px; } .doc .crop-handle[data-edge="r"] { right: -1px; }
+.doc .crop-handle[data-edge="t"] { top: -1px; } .doc .crop-handle[data-edge="b"] { bottom: -1px; }
+.doc .crop-handle:is([data-edge="lt"], [data-edge="rt"], [data-edge="lb"], [data-edge="rb"]) { width: 14px; height: 14px; }
+.doc .crop-handle[data-edge="lt"] { left: -1px; top: -1px; cursor: nwse-resize; } .doc .crop-handle[data-edge="rb"] { right: -1px; bottom: -1px; cursor: nwse-resize; }
+.doc .crop-handle[data-edge="rt"] { right: -1px; top: -1px; cursor: nesw-resize; } .doc .crop-handle[data-edge="lb"] { left: -1px; bottom: -1px; cursor: nesw-resize; }
+@media (pointer: coarse) {
+  .doc .crop-handle:is([data-edge="l"], [data-edge="r"]) { width: 12px; height: 34px; margin-top: -17px; }
+  .doc .crop-handle:is([data-edge="t"], [data-edge="b"]) { width: 34px; height: 12px; margin-left: -17px; }
+  .doc .crop-handle:is([data-edge="lt"], [data-edge="rt"], [data-edge="lb"], [data-edge="rb"]) { width: 22px; height: 22px; }
+}
 /* in a line of text: it moves with the words around it */
 .doc span.fig-inline { display: inline-block; max-width: 100%; vertical-align: baseline; }
 .doc span.fig-inline .fig-box { width: 100%; }
@@ -628,6 +659,13 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
 .line-body, .line-result { display: grid; gap: .55rem; }
 .line-crop { overflow: auto; max-height: 13rem; background: var(--well); border-radius: var(--r-ctl); overscroll-behavior: contain; }
 .line-crop canvas { display: block; }
+.line-shot { position: relative; width: max-content; min-width: 100%; }
+.line-crop.picking .line-shot { cursor: crosshair; touch-action: none; user-select: none; }
+.line-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 100vmax oklch(18% 0.01 255 / .3); pointer-events: none; }
+.line-crop.picking { overflow: hidden; }  /* the drag draws, it does not scroll */
+.line-pick { display: flex; flex-wrap: wrap; gap: .3rem; }
+.line-pick #linePickInsert { margin-inline-start: auto; }
+.line-pick [aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 .line-why { margin: 0; font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); }
 #noteWord { font-size: var(--fs-md); font-weight: 600; }
 
@@ -713,13 +751,38 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
   :root { --fs-xs: .875rem; --fs-sm: .9375rem; --fs-base: 1rem; --fs-md: 1.125rem; }
   :is(input:not([type=checkbox], [type=radio], [type=range], [type=color]), select, textarea, [contenteditable]) { font-size: max(1rem, 16px) !important; }
   .pop, .note-pop, .tb-pop, .sel-sheet, body.read-open .read-bar {
-    position: fixed; z-index: 50; inset: auto 0 0 0; width: auto; max-width: 40rem; margin-inline: auto; max-height: 85dvh; overflow: auto;
-    padding: 1.1rem 1rem calc(1.1rem + env(safe-area-inset-bottom)); background: var(--surface); color: var(--ink);
-    border: 1px solid var(--line); border-width: 1px 0 0; border-radius: var(--r-panel) var(--r-panel) 0 0; box-shadow: var(--shadow-2);
+    position: fixed; z-index: 50; inset: auto 0 0 0; width: auto; max-width: 40rem; margin-inline: auto;
+    max-height: calc(100dvh - 2.5rem - env(safe-area-inset-top)); overflow: auto;
+    overscroll-behavior: contain; padding: .5rem 1rem calc(1.1rem + env(safe-area-inset-bottom)); background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-width: 1px 0 0; border-radius: var(--r-sheet) var(--r-sheet) 0 0; box-shadow: var(--shadow-2);
     animation: sheet-up .42s var(--sheet-ease); }
+  /* the app's windows are sheets as well: from the bottom, the full width (the photo editor stays full screen) */
+  dialog:not(#dlgImage) { inset: auto 0 0 0; margin: auto auto 0; width: 100%; max-width: 40rem; max-height: 94dvh; overscroll-behavior: contain;
+    border-width: 1px 0 0; border-radius: var(--r-sheet) var(--r-sheet) 0 0; animation: sheet-up .42s var(--sheet-ease); }
+  dialog:not(#dlgImage) .dlg { max-height: calc(94dvh - 1.25rem); padding: .6rem 1rem calc(1.25rem + env(safe-area-inset-bottom)); }
+  dialog:not(#dlgImage) .dlg > .dlg-actions { bottom: calc(-1.25rem - env(safe-area-inset-bottom)); margin: 0 -1rem calc(-1.25rem - env(safe-area-inset-bottom));
+    padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); }
+  dialog:not(#dlgImage) .dlg.scrolls { padding: 0; }
+  dialog:not(#dlgImage) .dlg.scrolls > .dlg-head { padding: .35rem 1rem .7rem; }
+  dialog:not(#dlgImage) .dlg.scrolls > .dlg-body { padding: 1rem; }
+  dialog:not(#dlgImage) .dlg.scrolls > .dlg-actions { padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); }
+  dialog:not(#dlgImage) .dlg-actions .btn { flex: 1; min-height: 3rem; }
+  dialog:not(#dlgImage) .set-row { flex-wrap: wrap; }
+  /* every sheet: a grabber on top, pulled down to close it (app.js initSheetDrag) */
+  :is(.pop, .note-pop, .tb-pop, .sel-sheet, body.read-open .read-bar, dialog:not(#dlgImage))::before {
+    content: ""; display: block; flex: none; justify-self: center; align-self: center; width: 36px; height: 5px; margin: 0 auto .6rem;
+    border-radius: 3px; background: var(--line-strong); }
+  dialog:not(#dlgImage)::before { margin: .55rem auto 0; }
+  .sheet-pulled { transition: none !important; animation: none !important; }
+  .sheet-gone { visibility: hidden; }  /* pulled away: not seen again while it closes */
   body.read-open .read-bar { z-index: 48; }  /* its own options and versions open over it */
   .tb-pop { z-index: 55; justify-items: center; }  /* the colour and table panels, over the sheet they came from */
   .sel-sheet { z-index: 58; }  /* a list, over the sheet it is in */
+  /* a menu in a sheet: the full width, a finger's height per row */
+  .tb-pop:has(.tb-menu) { justify-items: stretch; }
+  .tb-pop .tb-menu { min-width: 0; }
+  .tb-pop .menu-row { min-height: 48px; font-size: var(--fs-base); }
+  .tb-pop .menu-chip { min-height: 44px; font-size: var(--fs-sm); }
   .sheet-out { animation: sheet-down .28s var(--sheet-ease) forwards !important; }  /* app.js slideOut, then hidden */
   body:is(.read-open, :has(details.pop-wrap[open], #notePop:not(.hidden), #linePop:not(.hidden), #colFilter:not(.hidden), #selSheet:not(.hidden)))::after {
     content: ""; position: fixed; inset: 0; z-index: 45; background: oklch(18% 0.01 255 / .3); animation: dim-in .42s var(--sheet-ease); }
