@@ -58,7 +58,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
 
   // insert a picture after the 3rd block
   await page.locator('#editor .ProseMirror > *').nth(2).click();
-  await page.click('#fmtBar button[aria-label^="إدراج جزء"]');
+  await page.click('#fmtBar button[aria-label="إدراج صورة"]'); await page.click('.tb-pop .menu-row:has-text("جزء من صورة الصفحة")');
   await page.waitForSelector('#ieCropBox:not(.hidden)');
   check('picture picker opens with the crop frame', (await page.textContent('#ieSave')).includes('إدراج'));
   await page.click('#ieSave');

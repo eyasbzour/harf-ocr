@@ -86,6 +86,7 @@
     function segsXml(segs, base) {
       var out = '';
       (segs || []).forEach(function (sg) {
+        if (sg.img) { out += drawing(sg.img, null); return; }  // a picture in the line
         var text = sg.s || '';
         var f = { b: sg.b || base.b, i: sg.i, u: sg.u, x: sg.x, c: sg.c || base.c, bg: sg.bg, sz: sg.sz ? Math.round(sg.sz * 2) : base.sz };
         var flagged = sg.note != null && sg.note !== '';
@@ -106,49 +107,81 @@
       return out;
     }
 
-    // o: { bold, size, color, keepNext, before, after, align, indent, hanging, indBoth, num: { id, lvl }, outline }
+    // o: { bold, size, color, keepNext, before, after, line, align, indent, hanging, indBoth, num: { id, lvl }, lit, outline }
+    // (lit: a list number written as text)
+    // (line: Word's line spacing in 240ths of a line)
     function para(segs, o) {
       o = o || {};
+      var anchor = floating; floating = '';  // a picture the text wraps around sits in the paragraph after it
       var ind = o.num ? '' : o.indent ? '<w:ind w:start="' + o.indent + '" w:hanging="' + (o.hanging || 0) + '"/>'
         : o.indBoth ? '<w:ind w:start="' + o.indBoth + '" w:end="' + o.indBoth + '"/>' : '';
       var pPr = '<w:pPr>' + (o.keepNext ? '<w:keepNext/>' : '') +
         (o.num ? '<w:numPr><w:ilvl w:val="' + o.num.lvl + '"/><w:numId w:val="' + o.num.id + '"/></w:numPr>' : '') + (rtlBlock ? '<w:bidi/>' : '') +
-        '<w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '" w:line="300" w:lineRule="auto"/>' +
+        '<w:spacing w:before="' + (o.before || 0) + '" w:after="' + (o.after == null ? 120 : o.after) + '" w:line="' + (o.line || 300) + '" w:lineRule="auto"/>' +
         ind + '<w:jc w:val="' + (o.align || 'both') + '"/>' + (o.outline != null ? '<w:outlineLvl w:val="' + o.outline + '"/>' : '') + '</w:pPr>';
-      return '<w:p>' + pPr + segsXml(segs, { b: o.bold, sz: o.size || size, c: o.color }) + '</w:p>';
+      var lit = o.lit ? '<w:r>' + rPr({ b: o.bold, sz: o.size || size }, true) + '<w:t>' + esc(o.lit) + '</w:t><w:tab/></w:r>' : '';
+      return '<w:p>' + pPr + anchor + lit + segsXml(segs, { b: o.bold, sz: o.size || size, c: o.color }) + '</w:p>';
     }
+    // a wrapped picture with no paragraph after it (the end of a page, or a table or picture next) gets its own
+    var floating = '';
+    function flush() { return floating ? para([], { after: 0 }) : ''; }
 
-    // ---- Word lists: one bullet definition, one numbered definition; every numbered list gets its own
-    // instance so it starts again at 1 (or at its block's start), its nested levels continue inside it
-    var nums = [];          // { id, kind: 'bullet' | 'decimal', start }
-    var bulletNum = null, olNum = null;
+    // ---- Word lists: a definition for each list style in use (blocks-doc.js ls; the plain bullets go • ◦ ▪ by level).
+    // One bullet list per style; every numbered list gets its own instance, so it starts again at 1 (or at its
+    // block's start); a nested numbered list in a style of its own gets one too, ended by the item above it.
+    // Word has no numbering in Arabic-Indic digits (its hindiNumbers are Devanagari), so those lists write their
+    // numbers into the text, with a list's hanging indent: { lit: 'NN.', lvl }
+    var nums = [];          // { id, abs, lvl, start }
+    var abstracts = [];     // { id, bullet, ls }
+    var bulletNums = {}, olRuns = [];  // olRuns[lvl]: { id, ls }, the numbered list in progress at that level
+    function newNum(bullet, ls, lvl, start) {
+      var a = abstracts.filter(function (x) { return x.bullet === bullet && x.ls === ls; })[0];
+      if (!a) { a = { id: 9001 + abstracts.length, bullet: bullet, ls: ls }; abstracts.push(a); }
+      var id = 9100 + nums.length;
+      nums.push({ id: id, abs: a.id, lvl: lvl, start: start });
+      return id;
+    }
     function listNum(bk) {
-      var lvl = Math.max(0, Math.min(8, bk.level || 0));
+      var lvl = Math.max(0, Math.min(8, bk.level || 0)), ls = bk.ls || '';
       if (bk.type === 'li') {
-        if (lvl === 0) olNum = null;  // a bullet list between numbered ones ends them
-        if (!bulletNum) { bulletNum = 9100 + nums.length; nums.push({ id: bulletNum, kind: 'bullet' }); }
-        return { id: bulletNum, lvl: lvl };
+        olRuns.length = Math.min(olRuns.length, lvl);  // it ends the numbered lists at its level and below
+        if (!bulletNums[ls]) bulletNums[ls] = newNum(true, ls, 0, 0);
+        return { id: bulletNums[ls], lvl: lvl };
       }
-      if (!olNum || (lvl === 0 && bk.restart)) { olNum = 9100 + nums.length; nums.push({ id: olNum, kind: 'decimal', start: bk.start || 1 }); }
-      return { id: olNum, lvl: lvl };
+      olRuns.length = Math.min(olRuns.length, lvl + 1);
+      var r = olRuns[lvl], top = olRuns[0];
+      // a nested list in the style of the list above it is that list's next level (Word starts it again at 1)
+      if (!r && lvl > 0 && top && top.ls === ls && ls !== 'hindi') r = olRuns[lvl] = top;
+      if (!r || r.ls !== ls || (lvl === 0 && bk.restart)) {
+        r = olRuns[lvl] = ls === 'hindi' ? { n: (bk.start || 1) - 1, ls: ls } : { id: newNum(false, ls, lvl, bk.start || 1), ls: ls };
+      }
+      if (ls === 'hindi') return { lit: String(++r.n).replace(/[0-9]/g, function (d) { return String.fromCharCode(0x660 + +d); }) + '.', lvl: lvl };
+      return { id: r.id, lvl: lvl };
     }
     var BULLETS = ['•', '◦', '▪'];
+    var BULLET_STYLE = { circle: '○', square: '■', diamond: '◆', arrow: '➢', check: '✓' };
+    var NUMBER_STYLE = { '': ['decimal', '.'], 'alpha-ar': ['arabicAlpha', '.'], paren: ['decimal', ')'],
+      lower: ['lowerLetter', '.'], upper: ['upperLetter', '.'], roman: ['lowerRoman', '.'] };
     function numberingParts() {
-      var lvls = function (kind) {
+      var lvls = function (a) {
         var x = '';
         for (var l = 0; l < 9; l++) {
-          x += '<w:lvl w:ilvl="' + l + '"><w:start w:val="1"/><w:numFmt w:val="' + kind + '"/>' +
-            '<w:lvlText w:val="' + (kind === 'bullet' ? BULLETS[l % 3] : '%' + (l + 1) + '.') + '"/><w:lvlJc w:val="left"/>' +
-            '<w:pPr><w:ind w:start="' + (720 * (l + 1)) + '" w:hanging="360"/></w:pPr></w:lvl>';
+          var fmt = a.bullet ? ['bullet', BULLET_STYLE[a.ls] || BULLETS[l % 3]] : (NUMBER_STYLE[a.ls] || NUMBER_STYLE['']);
+          var text = a.bullet ? fmt[1] : '%' + (l + 1) + fmt[1];
+          x += '<w:lvl w:ilvl="' + l + '"><w:start w:val="1"/><w:numFmt w:val="' + fmt[0] + '"/>' +
+            '<w:lvlText w:val="' + esc(text) + '"/><w:lvlJc w:val="left"/>' +
+            '<w:pPr><w:ind w:start="' + (720 * (l + 1)) + '" w:hanging="360"/></w:pPr>' +
+            (BULLET_STYLE[a.ls] ? '<w:rPr><w:rFonts w:ascii="Segoe UI Symbol" w:hAnsi="Segoe UI Symbol" w:cs="Segoe UI Symbol"/></w:rPr>' : '') + '</w:lvl>';
         }
         return x;
       };
       return {
-        abstracts: '<w:abstractNum w:abstractNumId="9001"><w:multiLevelType w:val="hybridMultilevel"/>' + lvls('bullet') + '</w:abstractNum>' +
-          '<w:abstractNum w:abstractNumId="9002"><w:multiLevelType w:val="hybridMultilevel"/>' + lvls('decimal') + '</w:abstractNum>',
+        abstracts: abstracts.map(function (a) {
+          return '<w:abstractNum w:abstractNumId="' + a.id + '"><w:multiLevelType w:val="hybridMultilevel"/>' + lvls(a) + '</w:abstractNum>';
+        }).join(''),
         nums: nums.map(function (n) {
-          return '<w:num w:numId="' + n.id + '"><w:abstractNumId w:val="' + (n.kind === 'bullet' ? 9001 : 9002) + '"/>' +
-            (n.kind === 'decimal' ? '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="' + n.start + '"/></w:lvlOverride>' : '') + '</w:num>';
+          return '<w:num w:numId="' + n.id + '"><w:abstractNumId w:val="' + n.abs + '"/>' +
+            (n.start ? '<w:lvlOverride w:ilvl="' + n.lvl + '"><w:startOverride w:val="' + n.start + '"/></w:lvlOverride>' : '') + '</w:num>';
         }).join(''),
       };
     }
@@ -181,8 +214,25 @@
       return x + '</w:tbl>' + para([], { after: 60 });
     }
 
-    // bk = { image, w, h, wFrac (share of the page width on the photo), align }; the bytes are added in build()
+    // bk = { image, w, h, wFrac (share of the page width on the photo), align, wrap, x, y }; the bytes are added in build().
+    // A wrapped picture (blocks-doc.js wrap) is anchored in the next paragraph; any other stands in a paragraph of its own
+    var POLYGON = '<wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/>' +
+      '<wp:lineTo x="21600" y="0"/><wp:lineTo x="0" y="0"/></wp:wrapPolygon>';
+    var WRAPS = { square: '<wp:wrapSquare wrapText="bothSides"/>', tight: '<wp:wrapTight wrapText="bothSides">' + POLYGON + '</wp:wrapTight>',
+      through: '<wp:wrapThrough wrapText="bothSides">' + POLYGON + '</wp:wrapThrough>', behind: '<wp:wrapNone/>', front: '<wp:wrapNone/>' };
+    // a picture's border (blocks-doc.js border), black as editor.js draws it: [width in EMU, compound, dash]
+    var LINES = {};
+    [['single', 9525, 'sng', 'solid'], ['thick', 28575, 'sng', 'solid'], ['double', 38100, 'dbl', 'solid'], ['dashed', 19050, 'sng', 'dash'],
+      ['dotted', 19050, 'sng', 'sysDot']].forEach(function (l) {
+      LINES[l[0]] = '<a:ln w="' + l[1] + '" cmpd="' + l[2] + '"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:prstDash val="' + l[3] + '"/></a:ln>';
+    });
     function picture(bk) {
+      var free = bk.wrap === 'behind' || bk.wrap === 'front';
+      if (free || (WRAPS[bk.wrap] && bk.align !== 'center')) { floating += drawing(bk, bk.wrap); return ''; }
+      return '<w:p><w:pPr><w:bidi/><w:spacing w:before="60" w:after="120"/><w:jc w:val="' + (bk.align || 'center') + '"/></w:pPr>' + drawing(bk, null) + '</w:p>';
+    }
+    // a run with the picture: in the line (wrap null) or anchored with that wrap
+    function drawing(bk, wrap) {
       var n = images.length + 1, rid = 'rIdDsImg' + n, id = 9000 + n;
       images.push({ rid: rid, name: bk.image, part: 'media/ds-img-' + n + '.jpeg' });
       var cx = Math.round(Math.min(1, bk.wFrac || 0.5) * textWidth * 635);  // twips -> EMU
@@ -190,33 +240,60 @@
       var maxH = 0.85 * textHeight * 635;  // taller than a page would push it, and the lines kept with it, to the next page
       if (cy > maxH) { cx = Math.round(cx * maxH / cy); cy = Math.round(maxH); }
       var ext = 'cx="' + cx + '" cy="' + cy + '"';
-      return '<w:p><w:pPr><w:bidi/><w:spacing w:before="60" w:after="120"/><w:jc w:val="' + (bk.align || 'center') + '"/></w:pPr><w:r><w:drawing>' +
-        '<wp:inline xmlns:wp="' + WP_NS + '" distT="0" distB="0" distL="0" distR="0"><wp:extent ' + ext + '/>' +
-        '<wp:docPr id="' + id + '" name="Picture ' + n + '"/>' +
+      var graphic = '<wp:docPr id="' + id + '" name="Picture ' + n + '"/>' +
         '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="' + A_NS + '" noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
         '<a:graphic xmlns:a="' + A_NS + '"><a:graphicData uri="' + PIC_NS + '"><pic:pic xmlns:pic="' + PIC_NS + '">' +
         '<pic:nvPicPr><pic:cNvPr id="' + id + '" name="' + esc(bk.image) + '"/><pic:cNvPicPr/></pic:nvPicPr>' +
         '<pic:blipFill><a:blip xmlns:r="' + R_NS + '" r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
-        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext ' + ext + '/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
-        '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext ' + ext + '/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' + (LINES[bk.border] || '') + '</pic:spPr>' +
+        '</pic:pic></a:graphicData></a:graphic>';
+      if (!wrap) {
+        return '<w:r><w:drawing><wp:inline xmlns:wp="' + WP_NS + '" distT="0" distB="0" distL="0" distR="0"><wp:extent ' + ext + '/>' + graphic +
+          '</wp:inline></w:drawing></w:r>';
+      }
+      // a free picture sits at its x, y from the text's left edge and its paragraph; a wrapped one at its side of the
+      // page (the start of these right-to-left pages is the right margin), 0.15 inch from the text
+      var free = wrap === 'behind' || wrap === 'front', emu = function (f) { return Math.round((f || 0) * textWidth * 635); };
+      var gap = free ? '0' : '137160';
+      return '<w:r><w:drawing><wp:anchor xmlns:wp="' + WP_NS + '" distT="' + (free ? 0 : 45720) + '" distB="' + (free ? 0 : 45720) + '" distL="' + gap + '" distR="' + gap + '"' +
+        ' simplePos="0" relativeHeight="' + (251659264 + n) + '" behindDoc="' + (wrap === 'behind' ? 1 : 0) + '" locked="0" layoutInCell="1" allowOverlap="1">' +
+        '<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="margin">' +
+        (free ? '<wp:posOffset>' + emu(bk.x) + '</wp:posOffset>' : '<wp:align>' + (bk.align === 'end' ? 'left' : 'right') + '</wp:align>') + '</wp:positionH>' +
+        '<wp:positionV relativeFrom="paragraph"><wp:posOffset>' + (free ? emu(bk.y) : 0) + '</wp:posOffset></wp:positionV>' +
+        '<wp:extent ' + ext + '/><wp:effectExtent l="0" t="0" r="0" b="0"/>' + WRAPS[wrap] + graphic + '</wp:anchor></w:drawing></w:r>';
     }
 
     function block(bk) {
+      var lead = bk.type === 'table' || bk.type === 'img' ? flush() : '';  // a wrapped picture needs a paragraph to sit in
       rtlBlock = bk.dir !== 'ltr';  // Word's start / end follow the paragraph's direction by themselves
       var al = bk.align === 'justify' ? 'both' : bk.align || null;
-      if (bk.type !== 'li' && bk.type !== 'ol') olNum = null;  // anything else ends a numbered list
+      if (bk.type !== 'li' && bk.type !== 'ol') olRuns = [];  // anything else ends a numbered list
+      return lead + blockXml(bk, al);
+    }
+    // the block's own spacing (lh, sb, sa) over the kind's
+    function spaced(bk, o) {
+      if (bk.lh) o.line = Math.round(240 * bk.lh);
+      if (bk.sb != null) o.before = Math.round(bk.sb * 20);
+      if (bk.sa != null) o.after = Math.round(bk.sa * 20);
+      return o;
+    }
+    function blockXml(bk, al) {
       switch (bk.type) {
         case 'h': {  // three heading levels, as Word's navigation pane sees them
           var lvl = Math.max(1, Math.min(3, bk.level || 2));
           var hs = lvl === 1 ? headSize + 6 : lvl === 2 ? headSize : size + 2;
-          return para(bk.segs, { bold: true, size: hs, keepNext: true, before: 120, after: 120, align: al || 'start', outline: lvl - 1 });
+          return para(bk.segs, spaced(bk, { bold: true, size: hs, keepNext: true, before: 120, after: 120, align: al || 'start', outline: lvl - 1 }));
         }
-        case 'q': return para(bk.segs, { bold: bk.bold, color: '404040', indBoth: 720, align: al || 'both' });
-        case 'c': return para(bk.segs, { bold: bk.bold !== false, align: al || 'center' });
-        case 'li': case 'ol': return para(bk.segs, { bold: bk.bold, num: listNum(bk), after: 60, align: al || 'start' });
+        case 'q': return para(bk.segs, spaced(bk, { bold: bk.bold, color: '404040', indBoth: 720, align: al || 'both' }));
+        case 'c': return para(bk.segs, spaced(bk, { bold: bk.bold !== false, align: al || 'center' }));
+        case 'li': case 'ol': {
+          var nm = listNum(bk);
+          var lo = nm.lit ? { lit: nm.lit, indent: 720 * (nm.lvl + 1), hanging: 360 } : { num: nm };
+          return para(bk.segs, spaced(bk, Object.assign(lo, { bold: bk.bold, after: 60, align: al || 'start' })));
+        }
         case 'table': return table(bk);
         case 'img': return picture(bk);
-        default: return para(bk.segs, { bold: bk.bold, align: al || 'both' });
+        default: return para(bk.segs, spaced(bk, { bold: bk.bold, align: al || 'both' }));
       }
     }
 
@@ -251,7 +328,7 @@
       return x + '</w:footnotes>';
     }
 
-    return { block: block, para: para, comments: comments, commentsXml: commentsXml, footnotes: footnotes, footnotesXml: footnotesXml, images: images,
+    return { block: block, para: para, flush: flush, comments: comments, commentsXml: commentsXml, footnotes: footnotes, footnotesXml: footnotesXml, images: images,
       nums: nums, numberingParts: numberingParts };
   }
 
@@ -261,6 +338,7 @@
     pages.forEach(function (pg, i) {
       if (i > 0 && opts.pageBreaks !== false) out += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
       (pg.blocks || []).forEach(function (bk) { out += B.block(bk); });
+      out += B.flush();  // a wrapped picture stays on its page
     });
     if (!out) out = B.para([]);
     return out;

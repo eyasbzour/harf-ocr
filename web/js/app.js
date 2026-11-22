@@ -1219,18 +1219,36 @@
   }
 
   // a picture on the clipboard pasted into the text goes in as a picture of the document, after the line
-  // the cursor is in; pasted anywhere else in a draft, it is a new page
-  async function pasteIntoText(files) {
+  // the cursor is in; pasted anywhere else in a draft, it is a new page. picked: pictures from a file instead
+  async function pasteIntoText(files, picked) {
+    const p = draft.pages[current];
     for (const f of files) {
       const fd = new FormData(); fd.append('file', f, f.name || 'pasted.png');
       try {
         const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
+        if (!pe && p) { p.blocks = p.blocks || []; renderEditor(); }
         if (!pe) return;
         // a screenshot about 1000 px wide fills the page width; a small one stays small
         pe.insertBlock({ type: 'figure', attrs: { image: r.name, w: r.width, h: r.height, wFrac: +Math.max(0.1, Math.min(1, r.width / 1000)).toFixed(3), align: null } });
-      } catch (e) { toast(`تعذر لصق الصورة: ${e.message}`, true); return; }
+      } catch (e) { toast(`${picked ? 'تعذر إدراج الصورة' : 'تعذر لصق الصورة'}: ${e.message}`, true); return; }
     }
-    toast(files.length > 1 ? 'أُلصقت الصور في النص.' : 'أُلصقت الصورة في النص. اضغطها لتغيير محاذاتها أو حذفها.');
+    const what = picked ? (files.length > 1 ? 'أُدرجت الصور.' : 'أُدرجت الصورة.') : (files.length > 1 ? 'أُلصقت الصور في النص.' : 'أُلصقت الصورة في النص.');
+    toast(files.length > 1 ? what : what + ' اضغطها لتغيير التفاف النص حولها وحجمها ومحاذاتها.');
+  }
+  // any picture on this computer or phone, into the text after the line the cursor is in
+  let imagePick = null;
+  function pickImage() {
+    if (!imagePick) {
+      imagePick = document.createElement('input');
+      imagePick.type = 'file'; imagePick.accept = 'image/*'; imagePick.multiple = true; imagePick.hidden = true;
+      imagePick.addEventListener('change', () => {
+        const files = [...imagePick.files].filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(f.name));
+        imagePick.value = '';
+        if (files.length && draft) pasteIntoText(files, true);
+      });
+      document.body.append(imagePick);
+    }
+    imagePick.click();
   }
   function pastePages(e) {
     if (!draft || !document.body.classList.contains('in-draft')) return;
@@ -1258,7 +1276,7 @@
     const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
     if (!pe) { p.blocks = p.blocks || []; renderEditor(); }
     pe.insertBlock({ type: 'figure', attrs: { image: r.name, w: r.width, h: r.height, wFrac: +wFrac.toFixed(3), align: null } });
-    toast('أُدرجت الصورة. اضغطها لتغيير محاذاتها أو حذفها.');
+    toast('أُدرجت الصورة. اضغطها لتغيير التفاف النص حولها وحجمها ومحاذاتها.');
   }
 
   // Select on the photo: drag a box around a part of it, drag inside the box to move it, then copy it (to paste
@@ -1562,7 +1580,7 @@
     $('btnRead').onclick = () => { setReadSheet(false); readPage(current); };
     $('btnReadAll').onclick = () => { setReadSheet(false); readAllUnread(); };
     toolbar = window.DocEditor.toolbar($('fmtBar'), () => pe, {
-      picture: insertPicture, flag: flagSelection, engines: engineChoices, hasPage: () => !!(draft && draft.pages[current]),
+      picture: insertPicture, pickImage, flag: flagSelection, engines: engineChoices, hasPage: () => !!(draft && draft.pages[current]),
       showLine: () => openLine(true), previewOn, togglePreview, slideOut, shutPop,
     }, $('editorScroll'));
     $('linePickLine').onclick = () => pickLine('line'); $('linePickPara').onclick = () => pickLine('para'); $('linePickRow').onclick = () => pickLine('row');

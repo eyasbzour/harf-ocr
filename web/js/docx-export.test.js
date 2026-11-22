@@ -94,3 +94,48 @@ test('lists, formatting, colours, headings, quote and cell fill reach Word', asy
   assert.ok(num.includes('w:abstractNumId="9001"') && num.includes('<w:startOverride w:val="1"/>'));
   assert.ok((await zip.file('[Content_Types].xml').async('string')).includes('/word/numbering.xml'));
 });
+
+test('list styles, line spacing and a picture the text wraps around reach Word', async () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '../../templates/plain.docx'));
+  const blocks = [
+    { type: 'img', image: 'a.jpg', w: 400, h: 300, wFrac: 0.33, wrap: 'square' },
+    { type: 'p', segs: [{ s: 'نص حول الصورة' }], lh: 2, sb: 12, sa: 0 },
+    { type: 'li', level: 0, segs: [{ s: 'صح' }], ls: 'check' },
+    { type: 'ol', level: 0, segs: [{ s: 'أول' }], ls: 'hindi' },
+    { type: 'ol', level: 1, segs: [{ s: 'فرعي' }], ls: 'alpha-ar' },
+    { type: 'ol', level: 0, segs: [{ s: 'ثان' }], ls: 'hindi' },
+    { type: 'img', image: 'b.jpg', w: 400, h: 300, wFrac: 0.5, wrap: 'square', align: 'end' },
+  ];
+  const zip = await JSZip.loadAsync(await DocxExport.build(tpl, { pages: [{ blocks }] }, { JSZip, fetchImage: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }));
+  const doc = await zip.file('word/document.xml').async('string');
+  const paras = doc.split('<w:p>');
+  const first = paras.find((x) => x.includes('<wp:anchor'));
+  assert.ok(first.includes('نص حول الصورة') && first.includes('<wp:align>right</wp:align>') && first.includes('<wp:wrapSquare'));  // in the next paragraph
+  assert.ok(doc.includes('w:before="240" w:after="0" w:line="480"'));
+  assert.ok(doc.includes('<wp:align>left</wp:align>'), 'the last picture, with no paragraph after it, still goes in');
+  // Arabic-Indic numbers are written into the text (Word's own are Devanagari), and go on after the nested list
+  assert.ok(doc.includes('<w:t>١.</w:t><w:tab/>') && doc.includes('<w:t>٢.</w:t><w:tab/>'));
+  assert.ok(doc.includes('<w:ind w:start="720" w:hanging="360"/>'));
+  assert.strictEqual([...doc.matchAll(/<w:numId w:val="(\d+)"\/>/g)].length, 2);  // the check bullet and the nested letters
+  const num = await zip.file('word/numbering.xml').async('string');
+  for (const bit of ['w:val="arabicAlpha"', '<w:lvlText w:val="✓"/>', 'w:ascii="Segoe UI Symbol"']) assert.ok(num.includes(bit), 'missing ' + bit);
+});
+
+test("Word's layout options, picture borders and a picture in a line reach Word", async () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '../../templates/plain.docx'));
+  const blocks = [
+    { type: 'p', segs: [{ s: 'قبل ' }, { s: '', img: { image: 'i.jpg', w: 10, h: 5, wFrac: 0.1, border: 'double' } }, { s: ' بعد' }] },
+    { type: 'img', image: 'b.jpg', w: 10, h: 10, wFrac: 0.4, wrap: 'behind', x: 0.25, y: 0.5 },
+    { type: 'p', segs: [{ s: 'نص' }] },
+    { type: 'img', image: 't.jpg', w: 10, h: 10, wFrac: 0.3, wrap: 'tight', border: 'dashed' },
+    { type: 'p', segs: [{ s: 'نص' }] },
+  ];
+  const zip = await JSZip.loadAsync(await DocxExport.build(tpl, { pages: [{ blocks }] }, { JSZip, fetchImage: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }));
+  const doc = await zip.file('word/document.xml').async('string');
+  const first = doc.split('<w:p>').find((x) => x.includes('قبل'));
+  assert.ok(first.includes('<wp:inline') && first.includes('cmpd="dbl"'), 'the picture inside the line, framed');
+  const tw = 11906 - 2 * 1417;
+  assert.ok(doc.includes('behindDoc="1"') && doc.includes('<wp:wrapNone/>') && doc.includes('<wp:posOffset>' + Math.round(0.25 * tw * 635) + '</wp:posOffset>'));
+  assert.ok(doc.includes('<wp:posOffset>' + Math.round(0.5 * tw * 635) + '</wp:posOffset>'));
+  assert.ok(doc.includes('<wp:wrapTight wrapText="bothSides"><wp:wrapPolygon') && doc.includes('<a:prstDash val="dash"/>'));
+});

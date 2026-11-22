@@ -11,7 +11,14 @@
  *   li / ol: bullet / numbered list item, level 0.. (nesting); start: number of the first item; restart: a new
  *   numbered list right after another one.  table: rows of cells (each cell is segs), cellBg: the cells' fill
  *   colours in the same shape (only when some cell has one); cellBoxes: each cell's spot on the photo, the same way.
- *   img: a picture.
+ *   ls: a list's style (li: 'circle' | 'square' | 'diamond' | 'arrow' | 'check'; ol: 'hindi' | 'alpha-ar' | 'lower' |
+ *   'upper' | 'roman' | 'paren'); none is the plain bullet or 1. 2. 3.
+ *   lh: line spacing (1 = single, as Word counts it); sb / sa: space before / after the paragraph, in points.
+ *   img: a picture; wrap (Word's Layout Options): 'square' | 'tight' | 'through' (the text flows around it),
+ *   'behind' | 'front' (placed freely: x, y in fractions of the page width, from the text's left edge and from its place
+ *   in the text), none: it stands on its own lines. border: 'single' | 'thick' | 'double' | 'dashed' | 'dotted'.
+ *   A seg { s: '', img: { image, w, h, wFrac, border? } } is a picture in a line.
+ *   fixedDir (li / ol): the item's side was set by hand (dir), so its first letter does not decide it.
  * The editor's document is Tiptap / ProseMirror JSON (paragraph, heading, bulletList, orderedList, table, figure).
  * Works in the browser (window.BlocksDoc) and in Node (require) for testing.
  */
@@ -45,10 +52,19 @@
     return n > 0 ? Math.round(n * 2) / 2 : null;
   }
 
+  // 'ltr' when the text starts with a Latin letter, 'rtl' with an Arabic or Hebrew one, null when it has neither yet
+  // (digits and signs say nothing): a list item takes its side from its own start, as Word's paragraphs do
+  function startDir(text) {
+    var m = String(text || '').match(/[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF]|[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/);
+    return m ? (/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/.test(m[0]) ? 'rtl' : 'ltr') : null;
+  }
+  function segsText(segs) { return (segs || []).map(function (sg) { return sg.s || ''; }).join(''); }
+
   // ------------------------------------------------------------------ blocks -> editor
   function inline(segs, bold) {
     var out = [];
     (segs || []).forEach(function (sg) {
+      if (sg.img) { out.push({ type: 'inlineImage', attrs: { image: sg.img.image, w: sg.img.w || 0, h: sg.img.h || 0, wFrac: sg.img.wFrac || 0.5, border: sg.img.border || null } }); return; }
       var marks = [];
       FORMAT.forEach(function (f) { if (sg[f[0]] || (f[0] === 'b' && bold)) marks.push({ type: f[1] }); });
       if (sg.c || sg.bg || sg.sz) {
@@ -68,6 +84,9 @@
     if (b.box) n.attrs.box = b.box;  // where it sits on the photo, to read it again with another engine
     if (b.lines) n.attrs.lines = b.lines;  // and each of its lines: [x0, y0, x1, y1, where its text starts]
     if (b.dir === 'ltr') n.attrs.dir = 'ltr';
+    if (b.lh) n.attrs.lineHeight = b.lh;
+    if (b.sb != null) n.attrs.spaceBefore = b.sb;
+    if (b.sa != null) n.attrs.spaceAfter = b.sa;
     var content = inline(segs, bold);
     if (content.length) n.content = content;
     return n;
@@ -80,16 +99,21 @@
       var type = b.type === 'ol' ? 'orderedList' : 'bulletList';
       var lvl = Math.max(0, Math.min(b.level || 0, stack.length));  // at most one level deeper than the last
       while (stack.length > lvl + 1) stack.pop();
-      if (stack.length === lvl + 1 && (stack[lvl].type !== type || (lvl === 0 && b.restart))) stack.pop();
+      var ls = b.ls || null;
+      if (stack.length === lvl + 1 && (stack[lvl].type !== type || stack[lvl].ls !== ls || (lvl === 0 && b.restart))) stack.pop();
       if (stack.length === lvl) {
         var list = { type: type, content: [] };
         if (type === 'orderedList') list.attrs = { start: b.start || 1 };
         if (b.dir === 'ltr') list.attrs = Object.assign(list.attrs || {}, { dir: 'ltr' });
+        if (ls) list.attrs = Object.assign(list.attrs || {}, { listStyle: ls });
+        Object.defineProperty(list, 'ls', { value: ls });  // to compare, not saved
         if (lvl === 0) root.push(list);
         else { var parent = stack[lvl - 1].content; parent[parent.length - 1].content.push(list); }
         stack.push(list);
       }
-      stack[lvl].content.push({ type: 'listItem', content: [textNode('paragraph', b, b.segs, b.bold)] });
+      var side = b.fixedDir ? (b.dir === 'ltr' ? 'ltr' : 'rtl') : startDir(segsText(b.segs));
+      var item = textNode('paragraph', side ? Object.assign({}, b, { dir: side === 'ltr' ? 'ltr' : null }) : b, b.segs, b.bold);
+      stack[lvl].content.push({ type: 'listItem', attrs: { dir: side || null, fixedDir: !!b.fixedDir }, content: [item] });
     });
     return root;
   }
@@ -116,7 +140,7 @@
           return { type: 'tableRow', content: cells };
         }) });
       } else if (b.type === 'img') {
-        out.push({ type: 'figure', attrs: { image: b.image, w: b.w || 0, h: b.h || 0, wFrac: b.wFrac || 0.5, align: b.align || null } });
+        out.push({ type: 'figure', attrs: { image: b.image, w: b.w || 0, h: b.h || 0, wFrac: b.wFrac || 0.5, align: b.align || null, wrap: b.wrap || null, x: b.x || 0, y: b.y || 0, border: b.border || null } });
       } else out.push(textNode('paragraph', b, b.segs, b.bold));
     });
     flush();
@@ -131,6 +155,7 @@
   // a flagged word stays one seg (one Word comment) even if part of it got another format
   function pushSeg(segs, sg) {
     var last = segs[segs.length - 1];
+    if (sg.img || (last && last.img)) { segs.push(sg); return; }  // a picture in the line is a seg of its own
     if (last && last.note == null && sg.note == null && sameFormat(last, sg)) last.s += sg.s;
     else if (last && last.note != null && sg.note === last.note && String(sg.box) === String(last.box)) last.s += sg.s;
     else segs.push(sg);
@@ -140,6 +165,12 @@
     var segs = [];
     (content || []).forEach(function (n) {
       if (n.type === 'hardBreak') { pushSeg(segs, { s: '\n' }); return; }
+      if (n.type === 'inlineImage') {
+        var ia = n.attrs || {}, im = { image: ia.image, w: ia.w, h: ia.h, wFrac: ia.wFrac };
+        if (ia.border) im.border = ia.border;
+        pushSeg(segs, { s: '', img: im });
+        return;
+      }
       if (n.type !== 'text' || !n.text) return;
       var sg = { s: n.text };
       (n.marks || []).forEach(function (m) {
@@ -177,6 +208,9 @@
     if (node && node.attrs && node.attrs.box) b.box = node.attrs.box;
     if (node && node.attrs && node.attrs.lines) b.lines = node.attrs.lines;
     if (ltr) b.dir = 'ltr';
+    if (node && node.attrs && node.attrs.lineHeight) b.lh = +node.attrs.lineHeight;
+    if (node && node.attrs && node.attrs.spaceBefore != null) b.sb = +node.attrs.spaceBefore;
+    if (node && node.attrs && node.attrs.spaceAfter != null) b.sa = +node.attrs.spaceAfter;
     return b;
   }
 
@@ -189,6 +223,8 @@
         var b = withAlign({ type: type, bold: false, level: level, segs: linesOf(item.content) }, paras[0]);
         if (k === 0 && type === 'ol' && node.attrs && node.attrs.start > 1) b.start = node.attrs.start;
         if (k === 0 && restart) b.restart = true;
+        if (item.attrs && item.attrs.fixedDir) b.fixedDir = true;
+        if (node.attrs && node.attrs.listStyle) b.ls = node.attrs.listStyle;
         out.push(b);
         (item.content || []).forEach(function (c) {
           if (c.type === 'bulletList' || c.type === 'orderedList') list(c, level + 1, false);
@@ -214,6 +250,9 @@
       else if (n.type === 'figure') {
         var a = n.attrs || {}, img = { type: 'img', image: a.image, w: a.w, h: a.h, wFrac: a.wFrac };
         if (a.align) img.align = a.align;
+        if (a.wrap) img.wrap = a.wrap;
+        if (a.wrap === 'behind' || a.wrap === 'front') { img.x = a.x || 0; img.y = a.y || 0; }
+        if (a.border) img.border = a.border;
         out.push(img);
       } else if (n.type === 'table') {
         var fills = [], anyFill = false, places = [], anyPlace = false;
@@ -240,5 +279,5 @@
     return out;
   }
 
-  return { blocksToDoc: blocksToDoc, docToBlocks: docToBlocks, segsToInline: inline };
+  return { blocksToDoc: blocksToDoc, docToBlocks: docToBlocks, segsToInline: inline, startDir: startDir };
 });

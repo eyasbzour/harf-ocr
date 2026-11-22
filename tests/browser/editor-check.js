@@ -38,12 +38,14 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const a = await charPoint(paras.nth(i1), 1), b = await charPoint(paras.nth(i2), 3);
   const want = await paras.evaluateAll((ns, [i1, i2]) => [ns[i1].textContent.slice(0, 12), ns[i2].textContent.slice(0, 12)], [i1, i2]);
   await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();
-  await tb('قائمة نقطية').click();
+  // bullets and numbering are one menu, as in Word
+  const pickList = async (label) => { await tb('التعداد النقطي والترقيم').click(); await page.click(`.tb-pop .ls-tile[aria-label="${label}"]`); };
+  await pickList('نقطة');
   const items = await page.$$eval('#editor .ProseMirror > ul > li', (n) => n.length);
   const got = await page.$$eval('#editor .ProseMirror > ul > li', (n) => n.map((x) => x.textContent.slice(0, 12)));
   check('mouse: lines dragged over become one bullet list', items === 2, JSON.stringify({ want, got }));
-  check('bullet button shows as on', (await tb('قائمة نقطية').getAttribute('aria-pressed')) === 'true');
-  await tb('قائمة مرقمة').click();
+  check('the list button shows as on', (await tb('التعداد النقطي والترقيم').getAttribute('aria-pressed')) === 'true');
+  await pickList('أرقام');
   check('the same lines switch to a numbered list', (await page.$$eval('#editor .ProseMirror > ol > li', (n) => n.length)) === items);
   // indent the second item under the first
   await page.locator('#editor .ProseMirror > ol > li').nth(1).click();
@@ -115,7 +117,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
 
   // pictures: inserted after the line, selected by a click, deleted
   await clickText(paras.nth(0));
-  await page.locator('#fmtBar button[aria-label^="إدراج جزء"]').click();
+  await page.click('#fmtBar button[aria-label="إدراج صورة"]'); await page.click('.tb-pop .menu-row:has-text("جزء من صورة الصفحة")');
   await page.waitForSelector('#ieCropBox:not(.hidden)'); await page.click('#ieSave');
   await page.waitForSelector('#editor figure.fig img');
   check('picture lands right after the line the cursor was in', await page.evaluate(() => {
@@ -140,7 +142,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('text colour from the palette', await p0.evaluate((n) => [...n.querySelectorAll('span[style]')].some((s) => s.style.color === 'rgb(255, 0, 0)')));
   await tb('لون خلفية النص').click(); await page.click('.tb-pop button[aria-label="أصفر باهت"]');
   check('text background from the palette', await p0.evaluate((n) => [...n.querySelectorAll('span[style]')].some((s) => s.style.backgroundColor === 'rgb(255, 242, 204)')));
-  await page.fill('#fmtBar .tb-size', '18'); await page.press('#fmtBar .tb-size', 'Enter');
+  await page.selectOption('#fmtBar .tb-size', '18');
   check('typed text size', await p0.evaluate((n) => [...n.querySelectorAll('span[style]')].some((s) => s.style.fontSize === '18pt')));
   const tables0 = await page.$$eval('#editor .ProseMirror table', (n) => n.length);
   await clickText(p0);

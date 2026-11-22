@@ -34,10 +34,15 @@ Until version 1.0.2 it was called DocScan; updating from it keeps your drafts an
   the whole paragraph, or in a table to the cell or its row. The eye button in the toolbar turns this off and on.
 - Any highlighted word, any line, paragraph or table cell, or every highlighted spot on a page can be **read again** with
   another reader. Its reading shows as a suggestion, and taking it replaces just that text and keeps its formatting.
-- The **editor** works like a page in Word: bold, italic, underline, strikethrough, text and highlight colors, any text size,
-  three heading levels, quotes, alignment, left-to-right paragraphs, and undo. Select any lines to make them a bulleted or
-  numbered list, then indent them. Tables take their size from a grid or from typed numbers, and their rows, columns, lines and
-  cell colors can all be changed. Pictures can be cut from the page photo (a logo, a chart, a signature): press تحديد on the
+- The **editor** works like a page in Word: bold, italic, underline, strikethrough, text and highlight colors, text sizes,
+  three heading levels, quotes, alignment, left-to-right paragraphs, line and paragraph spacing, and undo. One list button
+  holds Word's bullet and numbering styles (check marks, arrows, ١ ٢ ٣, أ ب ت, a b c, i ii iii and more), and each list item
+  sits on the side its first letter belongs to, so an English item on an Arabic page starts on the left. Tables take their
+  size from a grid or from typed numbers, and their rows, columns, lines and cell colors can all be changed. Any picture can go
+  into the text from a file. Pictures have Word's layout options: in line with the text (drag it to any place in a
+  sentence), square, tight, through, top and bottom, behind the text or in front of it (drag it anywhere on the page). They
+  can be resized by their corners and given a border (single, thick, double, dashed or dotted), and they reach Word the same
+  way. Pictures can also be cut from the page photo (a logo, a chart, a signature): press تحديد on the
   photo, drag a box around the part, move it if needed, then copy it or put it in the text. A copied part pastes into any
   program at the photo's full resolution. The tools for the
   selected text, table or picture appear right above it, and clicking a highlighted word opens a small panel with its note,
