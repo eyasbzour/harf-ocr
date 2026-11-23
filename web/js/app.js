@@ -1018,14 +1018,7 @@
   }
 
   // ------------------------------------------------------------------ flags / notes
-  function countFlags(blocks) {
-    let n = 0;
-    for (const b of blocks || []) {
-      if (b.type === 'table') (b.rows || []).forEach((r) => r.forEach((c) => (c || []).forEach((s) => { if (s.note != null) n++; })));
-      else (b.segs || []).forEach((s) => { if (s.note != null) n++; });
-    }
-    return n;
-  }
+  const countFlags = (blocks) => window.BlocksDoc.segLists(blocks).reduce((n, segs) => n + segs.filter((s) => s.note != null).length, 0);
 
   // "قراءة غير مؤكدة (درجة الثقة 22%)، قارن مع الصورة الأصلية" said the same long sentence under every word
   // the server's low-confidence note (engines/common.py) in any language, its {conf} caught
