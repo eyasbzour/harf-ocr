@@ -395,14 +395,24 @@
     };
     document.addEventListener('touchend', end, true); document.addEventListener('touchcancel', end, true);
   }
-  // a window closes as on its Esc; the others as on Esc, sliding on from where the finger left them
+  // the pulled sheet alone closes, the way its own close does (Esc closed every sheet open, the one under it too)
+  function closeSheet(el) {
+    const d = el.closest('details');
+    if (el.tagName === 'DIALOG') { if (el.dispatchEvent(new Event('cancel', { cancelable: true }))) el.close(); }
+    else if (el.id === 'readBar') setReadSheet(false);
+    else if (el.classList.contains('sel-sheet')) closeSelSheet(true);
+    else if (el.id === 'notePop') closeNote();
+    else if (el.id === 'linePop') closeLine();
+    else if (el.id === 'colFilter') closeColFilter(true);
+    else if (d) { d.open = false; }  // a menu (.pop) or a toolbar list (.tb-pop): already slid out by the pull
+  }
+  // sliding on from where the finger left it
   function dismissSheet(el, dy) {
     el.classList.remove('sheet-pulled');
     const out = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(100%)' }],
       { duration: 220, easing: 'cubic-bezier(.32, .72, 0, 1)', fill: 'forwards' });
     out.onfinish = () => {
-      if (el.tagName === 'DIALOG') { if (el.dispatchEvent(new Event('cancel', { cancelable: true }))) el.close(); }
-      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      closeSheet(el);
       el.style.transform = ''; el.classList.add('sheet-gone');
       setTimeout(() => { out.cancel(); el.classList.remove('sheet-gone'); }, 320);  // after its own slide-out, if any
     };
@@ -1020,9 +1030,13 @@
   }
 
   // "قراءة غير مؤكدة (درجة الثقة 22%)، قارن مع الصورة الأصلية" said the same long sentence under every word
+  // the server's low-confidence note (engines/common.py) in any language, its {conf} caught
+  let lowNote = null;
   const shortNote = (note) => {
-    const m = /(?:غير مؤكدة \(درجة الثقة|Uncertain reading \(confidence) (\d+)%\)/.exec(note || '');
-    return m ? tx('app.uncertainPercent', { percent: m[1] }) : note || tx('app.noNote');
+    lowNote = lowNote || new RegExp(I18N.texts('doc.uncertainReadingConfidenceCompareOriginal')
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{conf\\}', '(\\d+)')).join('|'));
+    const m = lowNote.exec(note || '');
+    return m ? tx('app.uncertainPercent', { percent: m.slice(1).find(Boolean) }) : note || tx('app.noNote');
   };
 
   // second readings of flagged spots, by their photo box: { engine, text }

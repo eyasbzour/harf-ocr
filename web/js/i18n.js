@@ -73,6 +73,10 @@
   var I18N = {
     t: t, message: message, apply: apply, revive: revive,
     lang: current,
+    // a name's text in every language, unfilled: to recognise text the server wrote in the page's language
+    texts: function (key) {
+      return Object.keys(dicts).map(function (c) { return dicts[c][key]; }).filter(function (v) { return typeof v === 'string'; });
+    },
     // { code, name, dir } for each language, the source first: names in their own language
     languages: function () {
       return Object.keys(metas).sort(function (a, b) { return (a !== SOURCE) - (b !== SOURCE) || (a < b ? -1 : 1); })

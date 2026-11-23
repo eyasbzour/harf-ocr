@@ -17,9 +17,9 @@ import threading
 import urllib.request
 import zipfile
 from pathlib import Path
+from updater import REPO, current
 from messages import msg
 
-REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
 HEAVY = ROOT / "parts" / "heavy"
 ASSETS = {"HarfOCR-part-heavy.zip": HEAVY, "HarfOCR-part-models.zip": ROOT / "models"}
@@ -65,7 +65,7 @@ def _run() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="docscan-parts-"))
     try:
         # this version's own release: its readers are built against this version's base packages
-        tag = "v" + os.environ.get("DOCSCAN_VERSION", "0.0.0")
+        tag = "v" + current()
         with _get(f"https://api.github.com/repos/{REPO}/releases/tags/{tag}") as r:
             assets = {a["name"]: a for a in json.load(r).get("assets", []) if a["name"] in ASSETS}
         if len(assets) < len(ASSETS):

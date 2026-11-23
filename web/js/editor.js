@@ -726,7 +726,8 @@
 
       toggleTableLines() {
         const lined = !editor.getAttributes('table').borderless;
-        focused().updateAttributes('table', lined ? { borderless: true } : { borderless: false, lineless: false }).run();
+        // hiding the lines keeps a data table a data table (lineless); borderless alone is the "parts" row layout
+        focused().updateAttributes('table', lined ? { borderless: true, lineless: true } : { borderless: false, lineless: false }).run();
       },
     };
     el.docEditor = api;  // for the browser checks (tests/browser)

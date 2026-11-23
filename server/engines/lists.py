@@ -13,10 +13,9 @@ import re
 import numpy as np
 from PIL import Image
 
-from .common import BULLETS, Line
+from .common import BULLETS, DIGITS, Line
 
 NUMBERED = re.compile(r"^[(\[]?([0-9٠-٩]{1,2}|[أ-ي])[.\-)\]]$|^[.\-)]([0-9٠-٩]{1,2})$")
-DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
 def _bullet_ink(ink: np.ndarray, ln: Line, h: float) -> bool:

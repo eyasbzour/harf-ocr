@@ -20,6 +20,7 @@ BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 # kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
 # Only between two letters: the one after a short prefix ("بـ PaddleOCR") is meant.
 KASHIDA = re.compile(r"(?<=[ء-ي])ـ+(?=[ء-ي])")
+DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")  # Eastern Arabic digits as Western ones
 HAS_LETTER = re.compile(r"[؀-ۿA-Za-z0-9]")
 CODE = re.compile(r'[{}\[\];]|":|=>')  # what a line of code or JSON has and a letter's line does not
 BULLETS = set("•●▪◦·-–✓✔➢►»«*○■□")  # with how readers misread a bullet ("»" for "•")

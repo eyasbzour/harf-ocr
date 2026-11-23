@@ -11,10 +11,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from .common import Line, Word
+from .common import DIGITS, Line, Word
 from messages import doc
 
-DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 NUM = re.compile(r"\d+")
 NOTE = doc("doc.numberTesseractReadPaddleocrMissed")
 

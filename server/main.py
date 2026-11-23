@@ -15,10 +15,11 @@ import secrets
 import shutil
 import time
 import uuid
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -199,7 +200,7 @@ def parts_install():
     return parts.status()
 
 
-# ------------------------------------------------------------------ engines + OCR
+# ------------------------------------------------------------------ use on phone: the link and its QR code
 @app.get("/api/remote")
 def remote_status():
     if not remote.offered():
@@ -246,6 +247,7 @@ async def remote_login(request: Request):
     return res
 
 
+# ------------------------------------------------------------------ engines + OCR
 @app.get("/api/engines")
 def list_engines(request: Request):
     out = []
@@ -389,8 +391,7 @@ def list_drafts():
 
 
 @app.post("/api/drafts")
-async def create_draft(request: Request):
-    body = await request.json()
+def create_draft(body: dict = Body(...)):
     now = time.time()
     tpls = list_templates()["templates"]  # sorted: first one is the default
     d = {"id": uuid.uuid4().hex, "name": str(body.get("name") or msg("ui.newDraft"))[:200],
@@ -406,8 +407,7 @@ def get_draft(draft_id: str):
 
 
 @app.put("/api/drafts/{draft_id}")
-async def put_draft(draft_id: str, request: Request):
-    body = await request.json()
+def put_draft(draft_id: str, body: dict = Body(...)):
     cur = _load(draft_id)
     if int(body.get("version", 0)) != int(cur.get("version", 0)):
         return refuse(msg("server.someoneElseEditedDraftOpen"), 409, current=cur)
@@ -426,11 +426,11 @@ def delete_draft(draft_id: str):
 
 
 @app.post("/api/drafts/{draft_id}/images")
-async def upload_image(draft_id: str, file: UploadFile = File(...)):
+def upload_image(draft_id: str, file: UploadFile = File(...)):
     dd = _draft_dir(draft_id)
     if not (dd / "draft.json").exists():
         _err(404, msg("server.draftNotFound"))
-    raw = await file.read(MAX_UPLOAD + 1)
+    raw = file.file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD:
         _err(413, msg("server.photoTooLargeLimitMb", limit=MAX_UPLOAD // 1024 ** 2))
     try:
@@ -490,16 +490,15 @@ def template_file(tpl_id: str):
     f = TEMPLATES / f"{tpl_id}.docx"
     if not f.exists():
         _err(404, msg("server.templateNotFound"))
-    return FileResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    return FileResponse(f, media_type=convert.FORMATS["docx"]["mime"])
 
 
 @app.post("/api/templates")
-async def add_template(name: str = Form(...), file: UploadFile = File(...), admin_token: str = Form("")):
+def add_template(name: str = Form(...), file: UploadFile = File(...), admin_token: str = Form("")):
     _check_admin(admin_token)
-    raw = await file.read(MAX_UPLOAD + 1)
+    raw = file.file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD or not raw.startswith(b"PK"):
         _err(400, msg("server.fileIsntValidWordFile"))
-    import zipfile
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             if "word/document.xml" not in z.namelist():
