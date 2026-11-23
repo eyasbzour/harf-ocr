@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>حرف: الدخول</title>
+<title data-i18n="signIn.pageTitle"></title>
 <!-- the phone's way in (server/remote.py): the password shown on the PC gives this browser a session -->
 <script src="js/theme.js"></script>
+<script src="js/i18n.js"></script>
+<script src="i18n/all.js"></script>
 <link rel="stylesheet" href="css/app.css">
 <style>
   body { overflow: auto; display: grid; place-items: center; min-height: 100dvh; padding: 1rem; box-sizing: border-box; }
@@ -20,16 +22,17 @@
 <body>
 <form class="phone-in" id="form">
   <span class="brand-mark" aria-hidden="true"><svg class="i"><use href="vendor/icons.svg#scan"/></svg></span>
-  <h1>حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية</h1>
-  <label class="field">كلمة المرور الظاهرة على شاشة الحاسوب
+  <h1 data-i18n="ui.titleFull"></h1>
+  <label class="field"><span data-i18n="signIn.passwordShownComputersScreen"></span>
     <input id="pw" required autocomplete="off" autocapitalize="none" spellcheck="false" dir="ltr" inputmode="text">
   </label>
   <p class="error" id="error" role="alert"></p>
-  <button class="btn primary" type="submit">دخول</button>
+  <button class="btn primary" type="submit" data-i18n="signIn.sign"></button>
 </form>
 <script>
+  I18N.apply(document.documentElement);
   const pw = document.getElementById('pw'), error = document.getElementById('error');
-  pw.addEventListener('invalid', () => pw.setCustomValidity(pw.validity.valueMissing ? 'اكتب كلمة المرور أولاً.' : ''));
+  pw.addEventListener('invalid', () => pw.setCustomValidity(pw.validity.valueMissing ? tx('signIn.typePassword') : ''));
   pw.addEventListener('input', () => { pw.setCustomValidity(''); error.textContent = ''; });
   document.getElementById('form').onsubmit = async (e) => {
     e.preventDefault();
@@ -38,8 +41,8 @@
       const res = await fetch('api/remote/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pw.value }) });
       if (res.ok) { location.replace('./'); return; }
-      error.textContent = (await res.json().catch(() => ({}))).error || 'تعذر الدخول.';
-    } catch (err) { error.textContent = 'تعذر الاتصال بالحاسوب. تأكد أن البرنامج مفتوح عليه.'; }
+      error.textContent = I18N.message(await res.json().catch(() => null)) || tx('signIn.couldntSign');
+    } catch (err) { error.textContent = tx('signIn.couldntReachComputerMakeSure'); }
     btn.disabled = false; pw.select();
   };
 </script>

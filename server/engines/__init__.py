@@ -6,12 +6,13 @@ import io
 import os
 
 from . import direction as ltr_page
-from .common import EngineError, each_box, lines_to_blocks, load_image, page_skew, unturn_box  # noqa: F401
+from .common import EngineError, each_box, in_language, lines_to_blocks, load_image, page_skew, seg_lists, unturn_box  # noqa: F401
 from .emphasis import mark_bold
 from .lists import mark_list_items
 from .marks import split_marks
 from .numbers import check_numbers
 from .tables import find_tables
+from messages import msg
 
 # EasyOCR and PaddleOCR score their own confidence lower than Tesseract does,
 # so they get their own threshold for flagging.
@@ -22,15 +23,15 @@ ENGINES = [
     # reads tables best. Known weakness (test pages): it kept 18/34 numbers, against 30 for Tesseract "best" and 33
     # for EasyOCR, because its Arabic model drops Western digits inside Arabic lines ("م ض / 245 / 2026") at high
     # confidence, so they are not flagged.
-    {"id": "paddle", "label": "PaddleOCR (موصى به)", "group": "free", "key": None},
+    {"id": "paddle", "label": msg("reader.paddleocrRecommended"), "group": "free", "key": None},
     # the most accurate for Arabic, also for numbers and some handwriting, but about a minute a page on a CPU:
     # the default second opinion for flagged words and paragraphs (nuqta_engine.py)
-    {"id": "nuqta", "label": "Nuqta (الأدق للعربية، أبطأ)", "group": "free", "key": None},
-    {"id": "tess-best", "label": "Tesseract (أدق)", "group": "free", "key": None},
+    {"id": "nuqta", "label": msg("reader.nuqtaMostAccurateArabicSlower"), "group": "free", "key": None},
+    {"id": "tess-best", "label": msg("reader.tesseractBest"), "group": "free", "key": None},
     {"id": "easyocr", "label": "EasyOCR", "group": "free", "key": None},
-    {"id": "tess-standard", "label": "Tesseract (عادي)", "group": "free", "key": None},
-    {"id": "tess-fast", "label": "Tesseract (سريع)", "group": "free", "key": None},
-    {"id": "claude", "label": "Claude (ذكاء اصطناعي)", "group": "ai", "key": "claude"},
+    {"id": "tess-standard", "label": msg("reader.tesseractStandard"), "group": "free", "key": None},
+    {"id": "tess-fast", "label": msg("reader.tesseractFast"), "group": "free", "key": None},
+    {"id": "claude", "label": msg("reader.claudeAi"), "group": "ai", "key": "claude"},
     {"id": "google", "label": "Google Vision", "group": "ai", "key": "google"},
 ]
 
@@ -48,17 +49,30 @@ def availability(engine_id: str) -> tuple[bool, str]:
         return ai_engines.claude_available()
     if engine_id == "google":
         return ai_engines.google_available()
-    return False, "محرك غير معروف"
+    return False, msg("server.unknownReader")
 
 
 def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str = "clean",
         api_key: str | None = None, model: str | None = None, skip_letterhead: bool = True,
-        low_conf: float = 65, langs: str = "ara+eng", spot: bool = False, direction: str = "auto") -> list[dict]:
+        low_conf: float = 65, langs: str = "ara+eng", spot: bool = False, direction: str = "auto",
+        doc_lang: str | None = None) -> tuple[list[dict], str]:
     """Read a page into blocks. spot=True: the image is a small cut-out (read_spots), read as plain text
     without the page-level steps (handwriting, lists, the number check). direction: "auto" (from the text),
-    "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py)."""
+    "rtl" (Arabic) or "ltr" (English): a left-to-right page's blocks get dir "ltr" (direction.py).
+    doc_lang: the language of the text the readers write into the document (notes, "[Signature]"); by default the
+    page's: English on a left-to-right page, Arabic otherwise. Returns the blocks and that language, which the page
+    keeps, so a spot read again later gets it too (read_spots)."""
+    blocks, ltr = _read(engine_id, image_bytes, rotation=rotation, cleanup=cleanup, api_key=api_key, model=model,
+                        skip_letterhead=skip_letterhead, low_conf=low_conf, langs=langs, spot=spot, direction=direction)
+    lang = doc_lang or ("en" if ltr else "ar")
+    return in_language(blocks, lang), lang
+
+
+def _read(engine_id, image_bytes, *, rotation, cleanup, api_key, model, skip_letterhead, low_conf, langs, spot,
+          direction) -> tuple[list[dict], bool]:
+    """The blocks, and whether the page runs left to right."""
     if engine_id not in {e["id"] for e in ENGINES}:
-        raise EngineError("محرك غير معروف")
+        raise EngineError(msg("server.unknownReader"))
     ok, why = availability(engine_id)
     if not ok:
         raise EngineError(why)
@@ -66,10 +80,10 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
     # own and do worse on it: PaddleOCR drops the digits of "الرقم: 245 / 2026" on the cleaned image.
     mode = cleanup if engine_id.startswith("tess-") else "none"
     img = load_image(image_bytes, rotation, mode)
-    if engine_id == "claude":
-        return ai_engines.run_claude(img, api_key, model, skip_letterhead and not spot)
-    if engine_id == "google":
-        return ai_engines.run_google(img, api_key, low_conf)
+    if engine_id in ("claude", "google"):
+        blocks = (ai_engines.run_claude(img, api_key, model, skip_letterhead and not spot) if engine_id == "claude"
+                  else ai_engines.run_google(img, api_key, low_conf))
+        return blocks, direction == "ltr" or (direction == "auto" and ltr_page.is_ltr_text(ltr_page.blocks_text(blocks)))
     # free engines: lines with word positions -> one shared layout step (tables, side-by-side parts, paragraphs)
     page = img if mode == "none" else load_image(image_bytes, rotation, "none")
     skew = 0.0 if spot else page_skew(page)
@@ -103,10 +117,12 @@ def run(engine_id: str, image_bytes: bytes, *, rotation: int = 0, cleanup: str =
         grids = ltr_page.mirror_grids(grids, W)
         colour = ltr_page.mirror_image(img if mode == "none" else load_image(image_bytes, rotation, "none"))
         img = ltr_page.mirror_image(img)
-    done = (lambda blocks: ltr_page.unmirror_blocks(blocks)) if ltr else (lambda blocks: blocks)  # noqa: E731
-    if skew:
-        flat = done
-        done = lambda blocks: each_box(flat(blocks), lambda box: unturn_box(box, skew, page.size))  # noqa: E731
+    def done(blocks):
+        if ltr:
+            blocks = ltr_page.unmirror_blocks(blocks)
+        if skew:
+            blocks = each_box(blocks, lambda box: unturn_box(box, skew, page.size))
+        return blocks, ltr  # run() decides the page's language from ltr
     if spot:
         return done(lines_to_blocks(lines, low_conf, grids, img.size))
     # handwriting, signatures and stamps leave the text and come back as notes (colour needs the photo itself)
@@ -138,12 +154,10 @@ def read_spots(engine_id: str, image_bytes: bytes, boxes: list, *, rotation: int
         buf = io.BytesIO()
         crop.save(buf, "PNG")
         segs: list[dict] = []
-        for bl in run(engine_id, buf.getvalue(), spot=True, **kw):
-            parts = [c for row in bl.get("rows", []) for c in row] if bl["type"] == "table" else [bl.get("segs", [])]
-            for part in parts:
-                if part and segs:
-                    segs.append({"s": " "})
-                segs.extend(part)
+        for part in seg_lists(run(engine_id, buf.getvalue(), spot=True, **kw)[0]):
+            if part and segs:
+                segs.append({"s": " "})
+            segs.extend(part)
         for sg in segs:  # a flag's spot is on the cut-out: put it back on the page
             if "box" in sg:
                 bx = sg["box"]

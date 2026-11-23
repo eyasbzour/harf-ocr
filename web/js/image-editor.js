@@ -118,7 +118,7 @@
       await opts.onSave(blob, c);
       $('dlgImage').close();
     } catch (e) {
-      await window.appAsk('تعذر حفظ الصورة: ' + (e && e.message ? e.message : e), { ok: 'حسناً', cancel: false });
+      await window.appAsk(tx('photoEditor.couldntSavePhoto', { error: e && e.message ? e.message : e }), { ok: tx('photoEditor.ok'), cancel: false });
     } finally { btn.disabled = false; }
   }
 
@@ -142,7 +142,7 @@
     const outside = (e) => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
     const leave = async () => {
       if (opts.pick || JSON.stringify(st) === opened ||
-          await window.appAsk('إغلاق محرر الصورة وتجاهل التعديلات؟', { ok: 'تجاهل التعديلات', danger: true })) dlg.close();
+          await window.appAsk(tx('photoEditor.closePhotoEditorDiscardChanges'), { ok: tx('photoEditor.discardChanges'), danger: true })) dlg.close();
     };
     let pressedOutside = false;
     dlg.addEventListener('pointerdown', (e) => { pressedOutside = outside(e); });
@@ -150,7 +150,7 @@
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); leave(); });  // Esc
     $('ieSave').onclick = save;
     $('ieRestore').onclick = async () => {
-      if (!opts.onRestore || !(await window.appAsk('استعادة الصورة الأصلية كما رُفعت؟ يضيع تحرير هذه الصورة.', { ok: 'استعادة', danger: true }))) return;
+      if (!opts.onRestore || !(await window.appAsk(tx('photoEditor.restoreOriginalPhotoUploadedPhotos'), { ok: tx('photoEditor.restore'), danger: true }))) return;
       await opts.onRestore(); $('dlgImage').close();
     };
     const box = $('ieCropBox');
@@ -174,11 +174,11 @@
     $('ieRestore').classList.toggle('hidden', !o.hasOriginal || !!o.pick);
     if (o.pick) { st.cropOn = true; resetCrop(); }
     opened = JSON.stringify(st);
-    $('ieSave').querySelector('span').textContent = o.pick ? 'إدراج في النص' : 'حفظ الصورة';
-    $('dlgImage').setAttribute('aria-label', o.pick ? 'إدراج صورة من الصفحة' : 'تحرير الصورة');
+    $('ieSave').querySelector('span').textContent = o.pick ? tx('photoEditor.insertText') : tx('photoEditor.savePhoto');
+    $('dlgImage').setAttribute('aria-label', o.pick ? tx('photoEditor.insertPicturePage') : tx('app.editPhoto'));
     const hint = document.querySelector('.img-ed-hint');
     hint.dataset.edit = hint.dataset.edit || hint.textContent;
-    hint.textContent = o.pick ? 'حرّك إطار القص حول الجزء المطلوب (شعار، رسم بياني، توقيع) ثم اضغط "إدراج في النص". يُدرج بعد الفقرة التي كنت فيها.' : hint.dataset.edit;
+    hint.textContent = o.pick ? tx('photoEditor.moveCropFrameAroundPart') : hint.dataset.edit;
     $('dlgImage').showModal();
     const cv = $('ieCanvas'); cv.width = cv.height = 1;
     img = await loadImage(o.src);

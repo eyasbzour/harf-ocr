@@ -11,7 +11,8 @@ import os
 import re
 from importlib.util import find_spec
 
-from .common import EngineError, Word, low_note, to_jpeg
+from .common import EngineError, Word, low_note, seg_lists, to_jpeg
+from messages import doc, msg, render
 
 MARK = re.compile(r"\[\[(.*?)\|\|(.*?)\]\]", re.S)
 TYPE_MAP = {"heading": "h", "paragraph": "p", "bullet": "li", "center": "c", "table": "table",
@@ -28,15 +29,19 @@ def claude_prompt(skip_letterhead: bool) -> str:
         if skip_letterhead else
         "Include the printed letterhead and footer text as normal blocks."
     )
-    return f"""You are transcribing one photographed page of an official Arabic document into JSON that will be turned into an editable Word document.
+    # the words Claude writes into the document come from the language files (doc.*), in the page's language
+    def words(lang):
+        return {k.split(".")[1]: render(lang, k) for k in ("doc.handwrittenNote", "doc.stamp", "doc.signature", "doc.uncertain", "doc.unreadable")}
+    ar, en = words("ar"), words("en")
+    return f"""You are transcribing one photographed page of an official document (usually Arabic) into JSON that will be turned into an editable Word document.
 
 Rules:
 1. Transcribe every printed or typed word exactly as printed: keep spelling mistakes, punctuation, numbers and wording. Do not correct, summarize, translate or reorder.
 2. Follow the page's reading order. Make one block per paragraph, heading, list item or table. Keep list numbers like "1." or "أولاً:" inside the text.
 3. {letterhead}
-4. Handwriting, stamps, seals, signatures, highlighter marks and watermarks are NOT body text. Never put them in blocks. For each one add an entry to "notes": "anchor" = 3 to 8 words copied exactly from a printed block next to it; "note" = in Arabic, what it is (تأشيرة بخط اليد / ختم / توقيع ...), where it is, and what you can read. Mark uncertain readings "(غير مؤكد)" and unreadable parts "[غير مقروء]". Never invent names, numbers or dates you cannot read.
-5. If a printed word is unclear (blurred, under a stamp, cut off), write your best reading as [[reading||short Arabic reason]]. If you cannot read it at all write [[…||غير مقروء: reason]].
-6. If something in the original looks wrong (for example numbers that do not add up), keep the original text and wrap it as [[text||Arabic description of the issue]].
+4. Handwriting, stamps, seals, signatures, highlighter marks and watermarks are NOT body text. Never put them in blocks. For each one add an entry to "notes": "anchor" = 3 to 8 words copied exactly from a printed block next to it; "note" = in the page's language, what it is ({ar["handwrittenNote"]} / {ar["stamp"]} / {ar["signature"]} ... on an Arabic page; {en["handwrittenNote"]} / {en["stamp"]} / {en["signature"]} ... on an English one), where it is, and what you can read. Mark uncertain readings "({ar["uncertain"]})" or "({en["uncertain"]})" and unreadable parts "[{ar["unreadable"]}]" or "[{en["unreadable"]}]". Never invent names, numbers or dates you cannot read.
+5. If a printed word is unclear (blurred, under a stamp, cut off), write your best reading as [[reading||short reason, in the page's language]]. If you cannot read it at all write [[…||{ar["unreadable"]}: reason]] or [[…||{en["unreadable"]}: reason]].
+6. If something in the original looks wrong (for example numbers that do not add up), keep the original text and wrap it as [[text||description of the issue, in the page's language]].
 7. Tables: use type "table" with "rows" (a list of rows, each a list of cell strings, header row first) and no "text".
 8. Use type "center" for centered lines such as closings or titles, "heading" for section titles, "bullet" for bulleted items, otherwise "paragraph". Set "bold" when the line is printed in bold.
 
@@ -49,7 +54,7 @@ def _text_to_segs(text: str) -> list[dict]:
     for m in MARK.finditer(text or ""):
         if m.start() > pos:
             segs.append({"s": text[pos:m.start()]})
-        segs.append({"s": m.group(1), "note": m.group(2).strip() or "غير مؤكد"})
+        segs.append({"s": m.group(1), "note": m.group(2).strip() or doc("doc.uncertain")})
         pos = m.end()
     if pos < len(text or ""):
         segs.append({"s": text[pos:]})
@@ -59,17 +64,8 @@ def _text_to_segs(text: str) -> list[dict]:
 def _attach_note(blocks: list[dict], anchor: str, note: str) -> None:
     anchor = (anchor or "").strip()
 
-    def seg_lists():
-        for b in blocks:
-            if b["type"] == "table":
-                for row in b.get("rows", []):
-                    for cell in row:
-                        yield cell
-            else:
-                yield b["segs"]
-
     if anchor:
-        for segs in seg_lists():
+        for segs in seg_lists(blocks):
             for i, sg in enumerate(segs):
                 if sg.get("note") is None and anchor in sg["s"]:
                     a = sg["s"].index(anchor)
@@ -83,30 +79,27 @@ def _attach_note(blocks: list[dict], anchor: str, note: str) -> None:
                     segs[i:i + 1] = parts
                     return
                 if sg.get("note") is not None and anchor in sg["s"]:
-                    sg["note"] += "\n" + note
+                    sg["note"] = doc("doc.notesJoined", first=sg["note"], second=note)
                     return
     # anchor not found: attach to the first text on the page
-    for segs in seg_lists():
+    for segs in seg_lists(blocks):
         for sg in segs:
             if sg["s"].strip():
-                prefix = "(موضع الملاحظة تقريبي) "
-                if sg.get("note"):
-                    sg["note"] += "\n" + prefix + note
-                else:
-                    sg["note"] = prefix + note
+                placed = doc("doc.notesPlaceApproximate", note=note)
+                sg["note"] = doc("doc.notesJoined", first=sg["note"], second=placed) if sg.get("note") else placed
                 return
-    blocks.append({"type": "p", "bold": False, "segs": [{"s": "ملاحظة", "note": note}]})
+    blocks.append({"type": "p", "bold": False, "segs": [{"s": doc("doc.note"), "note": note}]})
 
 
 def parse_claude_json(raw: str) -> list[dict]:
     s = raw.strip()
     a, b = s.find("{"), s.rfind("}")
     if a < 0 or b < 0:
-        raise EngineError("لم يرجع Claude نتيجة قابلة للقراءة")
+        raise EngineError(msg("server.claudeNoResult"))
     try:
         data = json.loads(s[a:b + 1])
     except json.JSONDecodeError as e:
-        raise EngineError("لم يرجع Claude نتيجة قابلة للقراءة (JSON)") from e
+        raise EngineError(msg("server.claudeNoJson")) from e
     blocks = []
     for bk in data.get("blocks", []):
         t = TYPE_MAP.get(str(bk.get("type", "paragraph")).lower(), "p")
@@ -126,7 +119,7 @@ def parse_claude_json(raw: str) -> list[dict]:
 
 def claude_available() -> tuple[bool, str]:
     if not find_spec("anthropic"):  # looked up, not imported: listing the readers stays instant
-        return False, "مكتبة anthropic غير مثبتة على الخادم"
+        return False, msg("server.anthropicLibraryIsntInstalledServer")
     return True, ""
 
 
@@ -135,11 +128,11 @@ def run_claude(img, api_key: str | None, model: str, skip_letterhead: bool) -> l
 
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        raise EngineError("أدخل مفتاح Claude API في الإعدادات")
+        raise EngineError(msg("server.enterClaudeApiKeySettings"))
     data = base64.b64encode(to_jpeg(img, 2000)).decode()
     client = anthropic.Anthropic(api_key=key, timeout=300, max_retries=2)
     try:
-        msg = client.messages.create(
+        reply = client.messages.create(
             model=model or "claude-sonnet-5-5",
             max_tokens=16000,
             messages=[{"role": "user", "content": [
@@ -148,21 +141,21 @@ def run_claude(img, api_key: str | None, model: str, skip_letterhead: bool) -> l
             ]}],
         )
     except anthropic.AuthenticationError as e:
-        raise EngineError("مفتاح Claude غير صالح") from e
+        raise EngineError(msg("server.claudeKeyIsntValid")) from e
     except anthropic.APIStatusError as e:
-        raise EngineError(f"خطأ من Claude ({e.status_code}): {getattr(e, 'message', e)}") from e
+        raise EngineError(msg("server.claudeError", status=e.status_code, error=getattr(e, "message", e))) from e
     except anthropic.APIConnectionError as e:
-        raise EngineError("تعذر الاتصال بخدمة Claude من الخادم") from e
-    raw = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
-    if msg.stop_reason == "max_tokens":
-        raise EngineError("الصفحة طويلة جداً لقراءتها دفعة واحدة")
+        raise EngineError(msg("server.couldntReachClaudeServer")) from e
+    raw = "".join(getattr(b, "text", "") for b in reply.content if getattr(b, "type", "") == "text")
+    if reply.stop_reason == "max_tokens":
+        raise EngineError(msg("server.pageTooLongReadOne"))
     return parse_claude_json(raw)
 
 
 # ---------------------------------------------------------------- Google Cloud Vision
 def google_available() -> tuple[bool, str]:
     if not find_spec("httpx"):
-        return False, "مكتبة httpx غير مثبتة على الخادم"
+        return False, msg("server.httpxLibraryIsntInstalledServer")
     return True, ""
 
 
@@ -171,7 +164,7 @@ def run_google(img, api_key: str | None, low_conf: float) -> list[dict]:
 
     key = api_key or os.environ.get("GOOGLE_VISION_API_KEY")
     if not key:
-        raise EngineError("أدخل مفتاح Google Vision في الإعدادات")
+        raise EngineError(msg("server.enterGoogleVisionKeySettings"))
     body = {"requests": [{
         "image": {"content": base64.b64encode(to_jpeg(img, 2400, 92)).decode()},
         "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
@@ -180,14 +173,14 @@ def run_google(img, api_key: str | None, low_conf: float) -> list[dict]:
     try:
         r = httpx.post("https://vision.googleapis.com/v1/images:annotate", params={"key": key}, json=body, timeout=120)
     except httpx.HTTPError as e:
-        raise EngineError("تعذر الاتصال بخدمة Google Vision من الخادم") from e
+        raise EngineError(msg("server.couldntReachGoogleVisionServer")) from e
     data = r.json() if r.content else {}
     if r.status_code != 200 or "error" in data:
-        msg = (data.get("error") or {}).get("message") or r.text[:200]
-        raise EngineError(f"خطأ من Google Vision: {msg}")
+        detail = (data.get("error") or {}).get("message") or r.text[:200]
+        raise EngineError(msg("server.googleVisionError", error=detail))
     res = (data.get("responses") or [{}])[0]
     if "error" in res:
-        raise EngineError(f"خطأ من Google Vision: {res['error'].get('message')}")
+        raise EngineError(msg("server.googleVisionError", error=res["error"].get("message")))
     pages = (res.get("fullTextAnnotation") or {}).get("pages") or []
     blocks = []
     for page in pages:

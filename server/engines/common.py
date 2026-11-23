@@ -14,11 +14,13 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from PIL import Image, ImageOps
+from messages import Msg, doc, render
 
-BIDI_MARKS = re.compile(r"[‎‏‪-‮⁦-⁩]")
+BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 # kashida (ـ) stretching a word in a justified letter: "الـمـوضـوع" reads as "الموضوع", so it can be found and edited.
 # Only between two letters: the one after a short prefix ("بـ PaddleOCR") is meant.
 KASHIDA = re.compile(r"(?<=[ء-ي])ـ+(?=[ء-ي])")
+DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")  # Eastern Arabic digits as Western ones
 HAS_LETTER = re.compile(r"[؀-ۿA-Za-z0-9]")
 CODE = re.compile(r'[{}\[\];]|":|=>')  # what a line of code or JSON has and a letter's line does not
 BULLETS = set("•●▪◦·-–✓✔➢►»«*○■□")  # with how readers misread a bullet ("»" for "•")
@@ -193,7 +195,7 @@ def clean_word(text: str) -> str:
 
 
 def low_note(conf: float) -> str:
-    return f"قراءة غير مؤكدة (درجة الثقة {round(conf)}%)، قارن مع الصورة الأصلية"
+    return doc("doc.uncertainReadingConfidenceCompareOriginal", conf=round(conf))
 
 
 def words_to_segs(words: list[Word], low_conf: float, size: tuple[int, int] | None = None) -> list[dict]:
@@ -590,3 +592,24 @@ def fragments_to_lines(frags: list[tuple[list, str, float]]) -> list[Line]:
         lines.append(Line(drop_junk(words), min(r["x0"] for r in row), min(r["y0"] for r in row),
                           max(r["x1"] for r in row), max(r["y1"] for r in row)))
     return lines
+
+
+def seg_lists(blocks: list[dict]):
+    """Every list of segments on a page: each paragraph's, and each table cell's."""
+    for b in blocks:
+        if b.get("type") == "table":
+            for row in b.get("rows") or []:
+                yield from row
+        else:
+            yield b.get("segs") or []
+
+
+def in_language(blocks: list[dict], lang: str) -> list[dict]:
+    """The doc() text in the blocks (segments' text and notes) rendered in lang: the page's language, which the
+    document keeps whatever the interface's (engines/__init__.py run)."""
+    for segs in seg_lists(blocks):
+        for sg in segs:
+            for k in ("s", "note"):
+                if isinstance(sg.get(k), Msg):
+                    sg[k] = render(lang, sg[k].key, **sg[k].args)
+    return blocks

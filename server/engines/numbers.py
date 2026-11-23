@@ -11,12 +11,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from .common import Line, Word
+from .common import DIGITS, Line, Word
+from messages import doc
 
-DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 NUM = re.compile(r"\d+")
-NUMBERISH = re.compile(r"[\d٠-٩/\\.:,،-]+")  # digits and what stands between them ("12 / 2026", "1/12/2026")
-NOTE = "رقم قرأه Tesseract ولم يظهر في قراءة PaddleOCR، تحقق منه في الصورة"
+NUMBERISH = re.compile(r"[\d\u0660-\u0669/\\.:,\u060c-]+")  # digits and what stands between them ("12 / 2026", "1/12/2026")
+NOTE = doc("doc.numberTesseractReadPaddleocrMissed")
 
 
 def numbers(text: str) -> Counter:

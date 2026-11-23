@@ -11,17 +11,25 @@ import re
 
 from PIL import Image, ImageOps
 
-from .common import Line, Word, each_box
+from .common import Line, Word, each_box, seg_lists
 
 LATIN = re.compile(r"[A-Za-z]")
 ARABIC = re.compile(r"[؀-ۿ]")
 
 
-def is_ltr(lines: list[Line]) -> bool:
+def is_ltr_text(text: str) -> bool:
     """Mostly Latin letters: an English page."""
-    text = " ".join(w.text for ln in lines for w in ln.words)
     latin, arabic = len(LATIN.findall(text)), len(ARABIC.findall(text))
     return latin >= 20 and latin > 1.5 * arabic
+
+
+def is_ltr(lines: list[Line]) -> bool:
+    return is_ltr_text(" ".join(w.text for ln in lines for w in ln.words))
+
+
+def blocks_text(blocks: list[dict]) -> str:
+    """The text of a page's blocks, table cells included."""
+    return " ".join(str(sg.get("s", "")) for segs in seg_lists(blocks) for sg in segs)
 
 
 def in_reading_order(lines: list[Line]) -> list[Line]:

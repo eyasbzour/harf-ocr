@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
+from messages import msg
 
 SOFFICE = os.environ.get("SOFFICE_BIN") or shutil.which("soffice") or shutil.which("libreoffice")
 PDFTOPPM = shutil.which("pdftoppm")
@@ -48,8 +49,8 @@ FORMATS = {
     "docx": {"label": "Word (.docx)", "ext": "docx", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     "pdf": {"label": "PDF", "ext": "pdf", "mime": "application/pdf"},
     "odt": {"label": "OpenDocument (.odt)", "ext": "odt", "mime": "application/vnd.oasis.opendocument.text"},
-    "png": {"label": "صور PNG", "ext": "png", "mime": "image/png"},
-    "txt": {"label": "نص عادي (.txt)", "ext": "txt", "mime": "text/plain; charset=utf-8"},
+    "png": {"label": msg("format.pngImages"), "ext": "png", "mime": "image/png"},
+    "txt": {"label": msg("format.plainTextTxt"), "ext": "txt", "mime": "text/plain; charset=utf-8"},
 }
 
 
@@ -91,7 +92,7 @@ def _word(src: Path, fmt: str, outdir: Path) -> Path:
             finally:
                 doc.Close(False)
         except Exception as e:
-            raise ConvertError(f"تعذر التحويل عبر Word: {e}") from e
+            raise ConvertError(msg("server.convertWordError", error=e)) from e
         finally:
             if word is not None:
                 try:
@@ -100,7 +101,7 @@ def _word(src: Path, fmt: str, outdir: Path) -> Path:
                     pass
             comtypes.CoUninitialize()
     if not out.exists():
-        raise ConvertError("تعذر التحويل عبر Word")
+        raise ConvertError(msg("server.convertWordFailed"))
     return out
 
 
@@ -109,12 +110,12 @@ def _to(src: Path, fmt: str, outdir: Path) -> Path:
         return _soffice(src, {"txt": "txt:Text (encoded):UTF8"}.get(fmt, fmt), outdir)
     if WORD:
         return _word(src, fmt, outdir)
-    raise ConvertError("لا يوجد على هذا الجهاز LibreOffice ولا Microsoft Word، لذا يتوفر Word (.docx) فقط")
+    raise ConvertError(msg("server.neitherLibreofficeNorMicrosoftWord"))
 
 
 def _soffice(src: Path, target: str, outdir: Path, timeout: int = 180) -> Path:
     if not SOFFICE:
-        raise ConvertError("LibreOffice غير مثبت على الخادم، لذا يتوفر Word فقط")
+        raise ConvertError(msg("server.libreofficeIsntInstalledServerOnly"))
     # a private profile per call lets several conversions run at the same time
     profile = outdir / "lo-profile"
     cmd = [SOFFICE, f"-env:UserInstallation=file://{profile}", "--headless", "--norestore",
@@ -122,18 +123,18 @@ def _soffice(src: Path, target: str, outdir: Path, timeout: int = 180) -> Path:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
-        raise ConvertError("استغرق التحويل وقتاً أطول من المسموح") from e
+        raise ConvertError(msg("server.conversionTookLongerThanAllowed")) from e
     ext = target.split(":")[0]
     out = outdir / (src.stem + "." + ext)
     if not out.exists():
-        raise ConvertError("تعذر التحويل: " + (r.stderr or r.stdout or "")[-300:])
+        raise ConvertError(msg("server.couldntConvert", error=(r.stderr or r.stdout or "")[-300:]))
     return out
 
 
 def convert(docx: bytes, fmt: str, base_name: str) -> tuple[bytes, str, str]:
     """Return (content, filename, mime)."""
     if fmt not in FORMATS:
-        raise ConvertError("صيغة غير معروفة")
+        raise ConvertError(msg("server.unknownFormat"))
     safe = "".join(c for c in (base_name or "document") if c not in '\\/:*?"<>|').strip() or "document"
     if fmt == "docx":
         return docx, safe + ".docx", FORMATS["docx"]["mime"]
@@ -173,10 +174,10 @@ def convert(docx: bytes, fmt: str, base_name: str) -> tuple[bytes, str, str]:
                 doc.close()  # Windows: the file stays locked, and the temporary folder undeletable, until closed
             err = ""
         else:
-            raise ConvertError("لا توجد أداة لتحويل الصفحات إلى صور على هذا الجهاز")
+            raise ConvertError(msg("server.theresNoToolComputerTurn"))
         pages = sorted(tmp.glob("page-*.png"), key=lambda p: int(p.stem.split("-")[-1]))
         if not pages:
-            raise ConvertError("تعذر إنشاء الصور: " + err[-200:])
+            raise ConvertError(msg("server.couldntMakeImages", error=err[-200:]))
         if len(pages) == 1:
             return pages[0].read_bytes(), safe + ".png", FORMATS["png"]["mime"]
         buf = io.BytesIO()

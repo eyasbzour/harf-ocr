@@ -17,8 +17,9 @@ import threading
 import urllib.request
 import zipfile
 from pathlib import Path
+from updater import REPO, current
+from messages import msg
 
-REPO = os.environ.get("DOCSCAN_UPDATE_REPO", "eyasbzour/harf-ocr")
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
 HEAVY = ROOT / "parts" / "heavy"
 ASSETS = {"HarfOCR-part-heavy.zip": HEAVY, "HarfOCR-part-models.zip": ROOT / "models"}
@@ -45,7 +46,7 @@ def start() -> None:
         if _state["state"] in ("downloading", "unpacking"):
             return
         if shutil.disk_usage(ROOT).free < NEED:
-            raise RuntimeError("لا توجد مساحة كافية على القرص: يلزم نحو 7 جيجابايت فارغة.")
+            raise RuntimeError(msg("server.notEnoughDiskSpaceAbout", need=NEED // 1024 ** 3))
         _state.update(state="downloading", done=0, total=0, error="")
         _stop.clear()
     threading.Thread(target=_run, daemon=True, name="parts").start()
@@ -64,11 +65,11 @@ def _run() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="docscan-parts-"))
     try:
         # this version's own release: its readers are built against this version's base packages
-        tag = "v" + os.environ.get("DOCSCAN_VERSION", "0.0.0")
+        tag = "v" + current()
         with _get(f"https://api.github.com/repos/{REPO}/releases/tags/{tag}") as r:
             assets = {a["name"]: a for a in json.load(r).get("assets", []) if a["name"] in ASSETS}
         if len(assets) < len(ASSETS):
-            raise RuntimeError("ملفات القرّاء غير موجودة في إصدار " + tag)
+            raise RuntimeError(msg("server.readerFilesArentRelease", tag=tag))
         _state["total"] = sum(a["size"] for a in assets.values())
         for name, a in assets.items():
             with _get(a["browser_download_url"]) as r, open(tmp / name, "wb") as f:
@@ -99,6 +100,6 @@ def _run() -> None:
     except _Stopped:
         _state.update(state="idle", done=0, total=0, error="")
     except Exception as e:
-        _state.update(state="error", error=f"تعذر تنزيل القرّاء الإضافيين: {e}")
+        _state.update(state="error", error=msg("server.couldntDownloadExtraReaders", error=e))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import shutil
 import socket
+import string
 import sys
 import threading
 import time
@@ -28,8 +30,38 @@ HERE = Path(__file__).resolve().parent  # {app}\app\desktop
 APP = HERE.parent                       # {app}\app
 ROOT = APP.parent                       # {app}
 VERSION = (HERE / "VERSION").read_text(encoding="utf-8").strip() if (HERE / "VERSION").exists() else "0.0.0"
-TITLE = "حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية"
 LOCAL = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "DocScan"
+# the server's modules, from here on (messages.py reads the language files for the launcher too)
+sys.path.insert(0, str(APP / "server"))
+from messages import SOURCE, language_file, languages, render  # noqa: E402
+
+
+def language() -> str:
+    """The interface language: the one picked in Settings (LOCAL\\lang, which the server's /api/lang writes), else the one
+    the installer ran in (ROOT\\lang.ini; installer.iss writes it on a fresh install only, so an update changes nothing),
+    else Arabic. The page itself keeps its own pick too (web/js/i18n.js) and gets this one as its default."""
+    def read(f: Path) -> str:
+        try:
+            return f.read_text(encoding="utf-8-sig")
+        except OSError:
+            return ""
+
+    ini = re.search(r"^\s*lang\s*=\s*(\w+)", read(ROOT / "lang.ini"), re.M)
+    for v in (read(LOCAL / "lang").strip(), ini and ini.group(1)):
+        if v in languages():
+            return v
+    return SOURCE
+
+
+LANG = language()
+
+
+def tr(key: str) -> str:
+    """What shows before the page (the window title, the splash, two message boxes) in the interface language."""
+    return render(LANG, key)
+
+
+TITLE = tr("ui.titleFull")
 # the same port every start, so the page's address stays the same: its settings (localStorage: theme, name, keys)
 # belong to the address, port included, and a new port each start forgot them. If another program holds it, a free
 # one is picked once and remembered (LOCAL\port), so the settings still last from then on.
@@ -37,7 +69,7 @@ PORT = 47615
 # the window's colour before the page draws: the app's --canvas (web/css/app.css), light and dark
 BG = {"light": "#e6e8eb", "dark": "#0f1112"}
 # a page being scanned: the beam passes and each line lights up as it is read. Colours are web/css/app.css's.
-SPLASH = """<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+SPLASH = """<!doctype html><html lang="$LANG" dir="$DIR"><head><meta charset="utf-8"><style>
 :root{--bg:oklch(93% .005 255);--ink:oklch(23% .006 255);--muted:oklch(48% .008 255);--accent:oklch(53% .19 257);
 --track:oklch(86% .005 255);--paper:oklch(99.7% .001 255)}
 @media (prefers-color-scheme:dark){:root{--bg:oklch(17.5% .004 255);--ink:oklch(93% .004 255);--muted:oklch(68% .008 255);
@@ -49,7 +81,7 @@ body.out{opacity:0}
 main{text-align:center;animation:rise .6s cubic-bezier(.22,1,.36,1) both}
 .doc{position:relative;width:64px;height:82px;margin:0 auto 26px;border-radius:8px;background:var(--paper);overflow:hidden;
 box-shadow:0 0 0 .5px #0001,0 1px 3px #0002,0 12px 32px #0002}
-.doc i{position:absolute;right:12px;height:4px;border-radius:2px;background:var(--muted);opacity:.3;animation:read 2.4s infinite}
+.doc i{position:absolute;inset-inline-start:12px;height:4px;border-radius:2px;background:var(--muted);opacity:.3;animation:read 2.4s infinite}
 .doc i:nth-child(1){top:16px;width:40px;animation-delay:.55s}.doc i:nth-child(2){top:28px;width:34px;animation-delay:.75s}
 .doc i:nth-child(3){top:40px;width:40px;animation-delay:.95s}.doc i:nth-child(4){top:52px;width:26px;animation-delay:1.15s}
 .doc i:nth-child(5){top:64px;width:32px;animation-delay:1.35s}
@@ -66,8 +98,10 @@ p{margin:0 0 18px;color:var(--muted);font-size:13px}
 @media (prefers-reduced-motion:reduce){.beam,.doc i,.bar b{animation:none}.beam{display:none}.bar b{width:100%;opacity:.5}}
 </style></head><body><main>
 <div class="doc" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><div class="beam"></div></div>
-<h1>حرف: تحويل الوثائق المصوّرة إلى مستندات رقمية</h1><p>جارٍ تشغيل البرنامج…</p>
-<div class="bar" role="progressbar" aria-label="جارٍ التشغيل"><b></b></div></main></body></html>"""
+<h1>$TITLE</h1><p>$STARTING</p>
+<div class="bar" role="progressbar" aria-label="$BUSY"><b></b></div></main></body></html>"""
+SPLASH = string.Template(SPLASH).substitute(LANG=LANG, DIR=language_file(LANG)[0]["dir"], TITLE=TITLE,
+                                            STARTING=tr("launcher.startingProgram"), BUSY=tr("launcher.starting"))
 
 
 def message(text: str, error: bool = False) -> None:
@@ -112,6 +146,7 @@ def setup() -> None:
     os.environ.update({
         "DOCSCAN_DATA": str(data), "DOCSCAN_TEMPLATES": str(templates),
         "DOCSCAN_DESKTOP": "1", "DOCSCAN_VERSION": VERSION, "DOCSCAN_ROOT": str(ROOT),
+        "DOCSCAN_LANG": LANG, "DOCSCAN_LANG_FILE": str(LOCAL / "lang"),  # the page's default; where /api/lang keeps a pick
         "TESSDATA_FAST": str(tess / "tessdata" / "fast"), "TESSDATA_STANDARD": str(tess / "tessdata" / "standard"),
         "TESSDATA_BEST": str(tess / "tessdata" / "best"),
         # every model ships with the program: no downloads, no "checking connectivity" at start
@@ -128,7 +163,6 @@ def setup() -> None:
     omp = ROOT / "parts" / "heavy" / "site-packages" / "torch" / "lib" / "libiomp5md.dll"
     if omp.exists():
         ctypes.WinDLL(str(omp))
-    sys.path.insert(0, str(APP / "server"))
     os.chdir(APP / "server")
 
 
@@ -168,7 +202,7 @@ def main() -> None:
     # one copy at a time: a second start would read the same drafts from two places
     ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\DocScan.single")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        message("البرنامج مفتوح بالفعل.")
+        message(tr("launcher.programAlreadyOpen"))
         return
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Eyasbzour.DocScan")  # taskbar: our icon and name
     (LOCAL / "logs").mkdir(parents=True, exist_ok=True)
@@ -178,8 +212,8 @@ def main() -> None:
     hide_child_consoles()
     setup()
 
-    # the web engine's own words ("please fill out this field", the right-click menu) in Arabic, like the app
-    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--lang=ar")
+    # the web engine's own words ("please fill out this field", the right-click menu) in the app's language
+    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", f"--lang={LANG}")
     import webview
 
     webview.settings["ALLOW_DOWNLOADS"] = True  # produced files go to the Downloads folder
@@ -212,7 +246,7 @@ def main() -> None:
             window.load_url(f"http://127.0.0.1:{port}/")
         except Exception:
             traceback.print_exc()
-            message("تعذر تشغيل البرنامج. التفاصيل في:\n" + str(LOCAL / "logs" / "docscan.log"), error=True)
+            message(tr("launcher.programCouldntStartDetails") + "\n" + str(LOCAL / "logs" / "docscan.log"), error=True)
             window.destroy()
             return
         # PaddleOCR, the default reader, takes seconds to load: do it while the user picks a photo, once the page

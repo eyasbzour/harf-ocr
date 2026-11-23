@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from messages import msg
 
 ROOT = Path(os.environ.get("DOCSCAN_ROOT", "."))
 EXE = ROOT / "bin" / "cloudflared.exe"
@@ -123,7 +124,7 @@ def _run(app) -> None:
         while not server.started and thread.is_alive():
             time.sleep(0.05)
         if not server.started:
-            raise RuntimeError("تعذر فتح منفذ الاتصال على هذا الجهاز")
+            raise RuntimeError(msg("server.couldntOpenConnectionPortComputer"))
         password = "".join(secrets.choice(ALPHABET) for _ in range(8))
         proc = subprocess.Popen([str(EXE), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -140,13 +141,13 @@ def _run(app) -> None:
         threading.Timer(45, _give_up, args=(proc,)).start()
     except Exception as e:
         stop()
-        _state.update(state="error", error=f"تعذر تشغيل الاتصال: {e}")
+        _state.update(state="error", error=msg("server.couldntStartConnection", error=e))
 
 
 def _give_up(proc: subprocess.Popen) -> None:
     if _proc is proc and _state["state"] == "starting":  # no link yet: no internet, or the service is blocked
         stop()
-        _state.update(state="error", error="تعذر الوصول إلى خدمة Cloudflare. تأكد من الاتصال بالإنترنت.")
+        _state.update(state="error", error=msg("server.couldntReachCloudflareCheckInternet"))
 
 
 def _watch(proc: subprocess.Popen, password: str) -> None:
@@ -156,4 +157,4 @@ def _watch(proc: subprocess.Popen, password: str) -> None:
             _state.update(state="on", url=m.group(0), password=password)
     if _proc is proc:  # it ended by itself, not by stop()
         stop()
-        _state.update(state="error", error="انقطع الاتصال. شغّله من جديد.")
+        _state.update(state="error", error=msg("server.connectionLostStartAgain"))

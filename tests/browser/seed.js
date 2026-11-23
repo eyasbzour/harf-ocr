@@ -18,7 +18,6 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
     await page.locator('#' + id).screenshot({ path: shots[id], type: 'jpeg', quality: q });
   }
   const api = page.request;
-  const labels = Object.fromEntries((await (await api.get(BASE + '/api/engines')).json()).engines.map((e) => [e.id, e.label]));
 
   async function upload(draftId, file, name, when) {
     const r = await api.post(`${BASE}/api/drafts/${draftId}/images`,
@@ -31,7 +30,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
     const r = await api.post(BASE + '/api/ocr', { multipart: { draft_id: draftId, image: p.image, engine }, timeout: 600000 });
     const d = await r.json();
     if (!r.ok()) throw new Error(`${engine}: ${d.error || r.status()}`);
-    p.versions.unshift({ id: uid(), label: labels[engine], at: Date.now() / 1000, blocks: clone(d.blocks) });
+    p.versions.unshift({ id: uid(), label: { engine }, at: Date.now() / 1000, blocks: clone(d.blocks) });
     p.blocks = clone(d.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = 0;
     console.log(`  ${engine} read ${p.file} in ${((Date.now() - t) / 1000).toFixed(1)}s, ${d.blocks.length} blocks`);
   }

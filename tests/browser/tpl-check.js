@@ -29,6 +29,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await page.screenshot({ path: path.join(__dirname, 'shots', 'tpl-dialog.png') });
   await page.click('#btnTplAdd');
   await page.waitForFunction(() => !document.getElementById('dlgTpl').open, null, { timeout: 5000 }).catch(() => {});
+  // the window closes first, then the list loads again and the new one is chosen: wait for that, not just the close
+  await page.waitForFunction(() => { const s = document.getElementById('templateSel'); return s.options[s.selectedIndex].textContent === 'قالب تجريبي'; }, null, { timeout: 5000 }).catch(() => {});
   const chosen = await page.$eval('#templateSel', (s) => s.options[s.selectedIndex].textContent);
   check('the new template is added and chosen for the draft', chosen === 'قالب تجريبي', chosen);
   const tpls = await (await page.request.get(`${BASE}/api/templates`)).json();

@@ -141,6 +141,21 @@ Optional readers: `pip install paddlepaddle==3.3.1 paddleocr==3.7.0` (PaddleOCR)
 `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`, then `pip install easyocr` and
 `pip install "transformers>=5.23" accelerate` (Nuqta). Without Docker they download their models the first time they read.
 
+## Languages
+
+The interface comes in Arabic and English. Pick one under Settings > Language and the page reloads in it. The Windows
+installer asks for a language and the program starts in that one until you pick another. On a server, `DOCSCAN_LANG=en`
+makes English the default for anyone who hasn't picked one.
+
+Each language is one file, `web/i18n/<code>.json`. Its `_meta` entry gives the language's name in that language and its
+direction (`rtl` or `ltr`). Every other entry is a name the code uses, like `ui.save`, with its text. `ar.json` is the
+source. To add a language, copy `en.json` to the new code, translate the values and set `_meta`. The server picks the file
+up, Settings lists it, and `node --test web/js/*.test.js` fails until the file has every name with the same `{values}`.
+A plural is an object with `one` and `other`, plus whatever forms the language needs (`zero`, `two`, `few`, `many`).
+
+Text written into the document, like the note on an unclear word or "[Signature]", follows the page's direction, not the
+interface: Arabic on a right-to-left page, English on a left-to-right one.
+
 ## Settings (environment variables)
 
 | Variable | Default | Meaning |
@@ -155,6 +170,7 @@ Optional readers: `pip install paddlepaddle==3.3.1 paddleocr==3.7.0` (PaddleOCR)
 | `NUQTA_MODEL` | `SalahALHaismawi/Nuqta-Arabic-OCR-0.8B` | The Nuqta model on Hugging Face. |
 | `MAX_OCR_JOBS` / `MAX_CONVERT_JOBS` | `2` / `2` | How many readings and conversions run at once. |
 | `DOCSCAN_DATA` / `DOCSCAN_TEMPLATES` | `./data` / `./templates` | Where drafts, photos and templates are kept. |
+| `DOCSCAN_LANG` | `ar` | The interface language for anyone who hasn't picked one (a file name in `web/i18n`). |
 
 ## Header templates
 
@@ -167,8 +183,9 @@ This repository ships only `plain.docx` (a page with the date at the top). Add y
 ## Tests
 
 ```bash
-cd server && python -m pytest tests -q   # layout from the photo: tables, lists, handwriting marks, numbers, headings
-node --test web/js/*.test.js             # the Word file, and the editor's conversion to and from the page model
+cd server && python -m pytest tests -q   # layout from the photo, and every server message by name in the language files
+node --test web/js/*.test.js             # the Word file, the editor's page model, and every language file
+cd tests/browser && npm ci && node i18n-check.js http://localhost:8000   # each language on a desktop and a phone screen
 ```
 
 The text editor is Tiptap (MIT). It is bundled once into `web/vendor/tiptap.min.js` (`cd tools/editor && npm ci && npm run build`),

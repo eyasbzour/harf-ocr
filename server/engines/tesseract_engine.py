@@ -8,6 +8,7 @@ import subprocess
 from functools import lru_cache
 
 from .common import EngineError, Line, Word, drop_junk
+from messages import msg
 
 # Model folders (see README for the downloads). Linux packages usually ship the "fast" models,
 # so each choice points at its own folder. If a folder is missing, that choice shows as unavailable;
@@ -46,14 +47,14 @@ def _dir(model: str) -> str:
 
 def available(model: str, langs: str = LANGS) -> tuple[bool, str]:
     if not shutil.which("tesseract"):
-        return False, "Tesseract غير مثبت على الخادم"
+        return False, msg("server.tesseractIsntInstalledServer")
     dir_ = _dir(model)
     if dir_ and not os.path.isdir(dir_):
-        return False, f"ملفات النموذج غير موجودة على الخادم: {dir_}"
+        return False, msg("server.modelFilesArentServer", folder=dir_)
     need = set(langs.split("+"))
     have = _langs_in(dir_)
     if not need <= have:
-        return False, "اللغة العربية غير مثبتة لهذا النموذج: " + ", ".join(sorted(need - have))
+        return False, msg("server.arabicIsntInstalledModel", missing=", ".join(sorted(need - have)))
     return True, ""
 
 
@@ -90,10 +91,10 @@ def _read(img, langs: str, dir_: str, psm: int) -> list[Line]:
     try:
         r = subprocess.run(cmd, input=png.getvalue(), capture_output=True, timeout=180)
     except subprocess.TimeoutExpired as e:
-        raise EngineError("انتهت مهلة القراءة بـ Tesseract") from e
+        raise EngineError(msg("server.readingTesseractTimedOut")) from e
     if r.returncode:
         err = r.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise EngineError("تعذرت القراءة بـ Tesseract: " + (err[-1] if err else str(r.returncode)))
+        raise EngineError(msg("server.couldntReadTesseract", error=err[-1] if err else str(r.returncode)))
     rows = [ln.split("\t") for ln in r.stdout.decode("utf-8", "replace").splitlines()[1:]]
     cols = ("level", "page_num", "block_num", "par_num", "line_num", "word_num", "left", "top", "width", "height", "conf")
     d = {c: [int(row[i]) if c != "conf" else row[i] for row in rows if len(row) == 12] for i, c in enumerate(cols)}

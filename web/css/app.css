@@ -91,6 +91,11 @@ h2 { font-size: var(--fs-md); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
 
 .i { width: 1.15em; height: 1.15em; flex-shrink: 0; fill: currentColor; vertical-align: -.2em; }
+/* Icons are drawn left to right (Phosphor). The ones that point along the line turn around on a right-to-left page:
+   back, undo and redo, indent, bullets. Alignment icons are physical, and the numbered list's digits must not mirror.
+   By the icon itself, so an icon the code swaps in later (editor.js iconOf) turns too. */
+:root[dir="rtl"] .i:has(> use:is([href$="#arrow-left"], [href$="#arrow-u-up-left"], [href$="#arrow-u-up-right"],
+  [href$="#list-bullets"], [href$="#text-indent"], [href$="#text-outdent"])) { transform: scaleX(-1); }
 .i.big { width: 2.25rem; height: 2.25rem; }
 
 /* ---------------------------------------------------------------- controls */
@@ -194,7 +199,7 @@ input[type=file] { min-height: 0; padding: .3rem; }
 .update-bar .i { color: var(--accent); }
 /* what's new opens under the bar, in the same band, so it reads as part of the offer */
 .update-notes { margin: 0; padding: .1rem 1rem .75rem; padding-inline-start: 2.75rem; display: grid; gap: .3rem;
-  max-height: 40dvh; overflow: auto; font-size: var(--fs-sm); background: var(--accent-soft); border-bottom: 1px solid var(--accent-line); }
+  overflow: auto; font-size: var(--fs-sm); background: var(--accent-soft); border-bottom: 1px solid var(--accent-line); }
 .update-notes li { max-width: 70ch; }
 .update-bar span { flex: 1 1 14rem; }  /* narrow: the buttons go under the text */
 .update-bar progress { width: 10rem; accent-color: var(--accent); }
@@ -205,7 +210,11 @@ body.in-draft .topbar { border-bottom-color: transparent; }  /* the title bar an
 .brand-mark { display: inline-grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: var(--r-ctl); background: var(--accent-fill); color: var(--accent-ink); flex-shrink: 0; }
 .topbar-actions { margin-inline-start: auto; display: flex; gap: .25rem; }
 
-.view { height: calc(100dvh - var(--topbar-h)); }
+/* the app's page is a column: the top bar, any bar under it (an update, readers downloading), then the view in what
+   is left; a view fixed at the window less the top bar lost its bottom under those bars (the page doesn't scroll) */
+body:has(> .view) { display: flex; flex-direction: column; height: 100dvh; }
+body:has(> .view) > :not(.view) { flex-shrink: 0; }
+.view { flex: 1 1 0; min-height: 0; }
 
 /* ---------------------------------------------------------------- home */
 .home { overflow-y: auto; padding: 2.25rem 1.25rem 4rem; background: var(--chrome); }
@@ -238,6 +247,8 @@ body.in-draft .topbar { border-bottom-color: transparent; }  /* the title bar an
 
 .draft-list:has(table) { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; }
 .draft-list table { width: 100%; border-collapse: collapse; }
+.draft-scroll { overflow-y: auto; }  /* its height: down to the window's bottom (app.js fitDrafts) */
+.draft-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px var(--line); }
 .draft-list tr:last-child td { border-bottom: 0; }
 .draft-list th { text-align: start; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); padding: .2rem .5rem; border-bottom: 1px solid var(--line); }
 .draft-list .th-in { display: flex; align-items: center; gap: .15rem; }
@@ -356,7 +367,7 @@ body.resizing iframe, body.resizing img { pointer-events: none; }
 /* wraps in a narrow pane: label, then the menu at full width, then the re-sort button */
 .order-row { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; padding: .5rem .75rem 0; }
 .order-row .inline-field { flex: 1 1 8rem; min-width: 0; flex-wrap: wrap; }
-.order-row select { flex: 1 1 6.5rem; min-width: 0; max-width: 100%; min-height: 2rem; padding-block: .2rem; }
+.order-row select { flex: 1 1 9.5rem; min-width: 0; max-width: 100%; min-height: 2rem; padding-block: .2rem; }
 .page-list { list-style: none; margin: 0; padding: .6rem; display: grid; gap: .35rem; overflow-y: auto; align-content: start; flex: 1; }
 /* as in Preview's sidebar: the page picture lies on the sidebar, the chosen page sits on a tinted plate */
 .page-item { position: relative; border-radius: var(--r-panel); padding: .55rem .55rem .35rem; cursor: pointer; transition: background-color .15s var(--ease); }
@@ -669,9 +680,9 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
 .line-why { margin: 0; font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); }
 #noteWord { font-size: var(--fs-md); font-weight: 600; }
 
-.toast { position: fixed; bottom: 1.25rem; inset-inline-start: 50%; transform: translateX(50%); z-index: 60; max-width: min(34rem, 92vw); padding: .7rem 1.1rem; border-radius: var(--r-panel); background: var(--ink); color: var(--surface); font-size: var(--fs-sm); box-shadow: var(--shadow-2); animation: toast-in .2s var(--ease); }
+.toast { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 60; max-width: min(34rem, 92vw); padding: .7rem 1.1rem; border-radius: var(--r-panel); background: var(--ink); color: var(--surface); font-size: var(--fs-sm); box-shadow: var(--shadow-2); animation: toast-in .2s var(--ease); }
 .toast.err { background: var(--danger); color: oklch(99% 0.005 27); }
-@keyframes toast-in { from { opacity: 0; transform: translate(50%, 8px); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
 /* ---------------------------------------------------------------- image editor */
 .img-dlg { width: min(75rem, 96vw); max-width: 96vw; }
@@ -711,7 +722,6 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
   .page-list { grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); }
   .page-actions { opacity: 1; }
   body.in-draft .topbar { display: none; }  /* in a draft the back arrow is enough; more room for the letter */
-  body.in-draft .view { height: 100dvh; }
   .editor-scroll { padding: .75rem .5rem 2rem; }
   .sheet { padding: 1.25rem 1rem 2rem; }
   .btn, input, select { min-height: 2.75rem; }
@@ -797,9 +807,9 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
   .draftbar .name-input { field-sizing: fixed; flex: 1 1 0; width: 0; min-width: 0; max-width: none; padding-inline: .3rem;
     font-size: var(--fs-base); text-overflow: ellipsis; }
   .draftbar .save-state { flex: none; padding-inline: .15rem; }
-  /* "إنتاج" on the button; its full name stays for screen readers */
-  #btnExport span[data-short] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #btnExport::after { content: "إنتاج"; }
+  /* the button's short name (data-short, in the page's language); its full name stays for screen readers */
+  #btnExport > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #btnExport::after { content: attr(data-short); }
   .phone-slot:empty { display: none; }
   .phone-doc { display: grid; gap: .6rem; padding-bottom: .9rem; border-bottom: 1px solid var(--line); }
   .phone-doc > .inline-field { order: 1; flex-direction: column; align-items: stretch; gap: .35rem; font-weight: 600; color: var(--ink); }

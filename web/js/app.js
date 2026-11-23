@@ -32,9 +32,9 @@
   async function api(path, opts = {}) {
     const res = await fetch(path, opts);
     let data = null;
-    try { data = await res.json(); } catch (e) { /* non-json */ }
+    try { data = JSON.parse(await res.text(), I18N.revive); } catch (e) { /* non-json */ }  // messages in the language
     if (!res.ok) {
-      const err = new Error((data && (data.error || data.detail)) || ('خطأ ' + res.status));
+      const err = new Error(I18N.message(data) || tx('app.errorStatus', { status: res.status }));
       err.status = res.status; err.data = data; throw err;
     }
     return data;
@@ -44,7 +44,7 @@
   // OK, Cancel and Esc answer the open question at once. The dialog's "close" event comes a moment
   // later, and would answer the next question instead if one was asked straight after.
   let askAnswer = null;
-  function ask(message, { ok = 'متابعة', danger = false, cancel = true } = {}) {
+  function ask(message, { ok = tx('app.continue'), danger = false, cancel = true } = {}) {
     const dlg = $('dlgAsk');
     if (!dlg.dataset.bound) {
       dlg.dataset.bound = '1';
@@ -70,7 +70,7 @@
   }
   window.appAsk = ask;  // the image editor uses it too
   const jsonOpts = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const fmtTime = (s) => new Date(s * 1000).toLocaleString('ar', { dateStyle: 'medium', timeStyle: 'short' });
+  const fmtTime = (s) => new Date(s * 1000).toLocaleString(I18N.lang(), { dateStyle: 'medium', timeStyle: 'short' });
   const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const isoToDMY = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
@@ -94,13 +94,22 @@
 
   // ------------------------------------------------------------------ state
   let ENGINES = [], CLAUDE_MODELS = [], TEMPLATES = [], TPL_ADMIN = false, FORMATS = [];
+  const useEngines = (eng) => { ENGINES = eng.engines; };
+  const useTemplates = (tpl) => { TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired; };
   let draft = null;          // the open draft
   let current = 0;           // index of the page being shown
   let dirty = false, saving = false, saveTimer = null;
-  const busyPages = new Set();
+  const busyPages = new Map();  // page id -> its reading's AbortController (stopReading)
 
   // ------------------------------------------------------------------ boot
   // the Windows program checks GitHub for a newer version at start (server/updater.py); a quiet bar offers it
+  // a list shows its first n items and scrolls past them: its height ends under item n, however the items wrap
+  function capTo(box, items, n) {
+    box.style.maxHeight = '';
+    if (items.length <= n) return;
+    const pad = parseFloat(getComputedStyle(box).paddingBottom) || 0;
+    box.style.maxHeight = (items[n - 1].getBoundingClientRect().bottom - box.getBoundingClientRect().top + pad) + 'px';
+  }
   let appVersion;  // the Windows program's version; null on a server (no updates there), undefined until asked
   async function checkUpdate(tries = 4) {
     let st;
@@ -110,23 +119,25 @@
     if (st.update && store.get('skipUpdate') !== st.update.version) showUpdate(st.update);
   }
   function showUpdate(u) {
-    $('updateText').textContent = `يتوفر إصدار جديد من البرنامج (${u.version}).`;
+    $('updateText').textContent = tx('app.newVersionProgramAvailable', { version: u.version });
     $('updateBar').classList.remove('hidden');
     // the tag's message, one change per line ("- " or "* " in front is dropped); shown as text, never as HTML
     const lines = (u.notes || '').split('\n').map((l) => l.replace(/^\s*[-*•]\s*/, '').trim()).filter(Boolean);
     $('updateNotes').replaceChildren(...lines.map((l) => el('li', null, l)));
     const notesBtn = $('updateNotesBtn'), openNotes = (open) => {
       $('updateNotes').classList.toggle('hidden', !open); notesBtn.setAttribute('aria-expanded', open);
-      notesBtn.textContent = open ? 'إخفاء التفاصيل' : 'ما الجديد؟';
+      if (open) { $('updateNotes').scrollTop = 0; capTo($('updateNotes'), $('updateNotes').children, 4); }
+      notesBtn.textContent = open ? tx('app.hideDetails') : tx('app.whatsNew');
     };
     notesBtn.classList.toggle('hidden', !lines.length); openNotes(false);
     notesBtn.onclick = () => openNotes(notesBtn.getAttribute('aria-expanded') !== 'true');
     $('updateLater').onclick = () => { $('updateBar').classList.add('hidden'); openNotes(false); store.set('skipUpdate', u.version); };
     $('btnUpdate').onclick = async () => {
-      if (!(await ask(`سيُنزَّل الإصدار ${u.version} ويُثبَّت، ثم يُفتح البرنامج من جديد. يُحفظ عملك أولاً.`, { ok: 'تحديث' }))) return;
+      if (!(await ask(tx('app.versionWillDownloadedInstalledProgram', { version: u.version }), { ok: tx('app.update') }))) return;
       if (draft && dirty) await saveDraft();
-      $('btnUpdate').disabled = true; $('updateText').textContent = 'جارٍ تنزيل التحديث… سيُغلق البرنامج ويُفتح من جديد.';
-      try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); $('btnUpdate').disabled = false; }
+      const busy = (on) => { $('btnUpdate').disabled = on; $('updateLater').disabled = on; };
+      busy(true); $('updateText').textContent = tx('app.downloadingUpdateProgramWillClose');
+      try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); busy(false); }
     };
   }
   // use on phone (the Windows program, on the PC; server/remote.py): the top bar's button shows while the link is open
@@ -144,32 +155,32 @@
   function showPhone(st) {
     const on = st.state === 'on', busy = st.state === 'starting', show = (id, yes) => $(id).classList.toggle('hidden', !yes);
     $('btnPhone').classList.toggle('live', on);
-    $('btnPhone').querySelector('span').textContent = on ? 'على الهاتف: يعمل' : 'على الهاتف';
+    $('btnPhone').querySelector('span').textContent = on ? tx('app.phoneOn') : tx('app.phone');
     show('phoneOff', !on && !busy); show('phoneBusy', busy); show('phoneOn', on);
-    show('phoneError', st.state === 'error'); $('phoneError').textContent = st.error || '';
-    show('phoneStart', !on && !busy); $('phoneStart').textContent = st.state === 'error' ? 'إعادة المحاولة' : 'تشغيل';
+    show('phoneError', st.state === 'error'); $('phoneError').textContent = I18N.message(st.error);
+    show('phoneStart', !on && !busy); $('phoneStart').textContent = st.state === 'error' ? tx('app.tryAgain') : tx('app.start');
     show('phoneStop', on || busy);
     if (on) { $('phoneQr').innerHTML = st.qr; $('phoneUrl').textContent = st.url; $('phonePw').textContent = st.shown; }
     clearTimeout(phoneTimer);  // quick while it starts; now and then while open, so the button stays true
     if (busy || on) phoneTimer = setTimeout(refreshPhone, busy ? 1000 : 15000);
   }
   function copyText(id) {
-    navigator.clipboard.writeText($(id).textContent).then(() => toast('نُسخ.'), () => toast('تعذر النسخ.', true));
+    navigator.clipboard.writeText($(id).textContent).then(() => toast(tx('app.copied')), () => toast(tx('app.couldntCopy'), true));
   }
 
   // Settings > Updates: asked for, so a version put off with "later" is offered again
   async function checkUpdateNow() {
     const btn = $('btnCheckUpdate');
-    btn.disabled = true; $('updateInfo').textContent = 'جارٍ التحقق…';
+    btn.disabled = true; $('updateInfo').textContent = tx('app.checking');
     try {
       const st = await api('/api/update/check', { method: 'POST' });
       if (st.update) {
-        $('updateInfo').textContent = `يتوفر الإصدار ${st.update.version}.`;
+        $('updateInfo').textContent = tx('app.versionAvailable', { version: st.update.version });
         showUpdate(st.update);
-        $('checkUpdateLabel').textContent = 'تحديث الآن';
+        $('checkUpdateLabel').textContent = tx('app.updateNow');
         btn.onclick = () => { $('dlgSettings').close(); $('btnUpdate').click(); };
       } else {
-        $('updateInfo').textContent = `الإصدار ${st.current}، وهو أحدث إصدار.`;
+        $('updateInfo').textContent = tx('app.versionLatest', { version: st.current });
       }
     } catch (e) { $('updateInfo').textContent = e.message; }
     btn.disabled = false;
@@ -180,10 +191,10 @@
     bindStatic();
     try {
       const [eng, tpl, fmt] = await Promise.all([api('/api/engines'), api('/api/templates'), api('/api/formats')]);
-      FORMATS = fmt.formats;
-      ENGINES = eng.engines; CLAUDE_MODELS = eng.claudeModels;
-      TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired;
-    } catch (e) { toast('تعذر الاتصال بالخادم: ' + e.message, true); }
+      FORMATS = fmt.formats;  // its labels, the readers' and the built-in template's arrive in the language (api)
+      useEngines(eng); useTemplates(tpl);
+      CLAUDE_MODELS = eng.claudeModels;
+    } catch (e) { toast(tx('app.couldntReachServer', { error: e.message }), true); }
     fillEngineSelect(); fillTemplateSelect(); fillFormats();
     $('newOwner').value = settings.author;
     route();
@@ -220,20 +231,20 @@
       }
       renderDraftList();
     } catch (e) {
-      box.replaceChildren(el('p', { class: 'muted draft-none' }, 'تعذر تحميل المسودات: ' + e.message,
-        el('button', { type: 'button', class: 'btn ghost small', onclick: loadDraftList }, 'أعد المحاولة')));
+      box.replaceChildren(el('p', { class: 'muted draft-none' }, tx('app.couldntLoadDrafts', { error: e.message }),
+        el('button', { type: 'button', class: 'btn ghost small', onclick: loadDraftList }, tx('app.retry'))));
     }
   }
 
   // Columns: [key, title, searchable]. A title click sorts (again flips: text أ to ي first, numbers and dates
   // largest/newest first); the funnel beside it, or a double-click on the title, searches that column.
-  const DRAFT_COLS = [['name', 'الوثيقة', true], ['owner', 'بواسطة', true], ['pages', 'الصفحات', true], ['updated', 'آخر تعديل', false]];
+  const DRAFT_COLS = [['name', tx('app.colDocument'), true], ['owner', tx('app.colBy'), true], ['pages', tx('app.colPages'), true], ['updated', tx('app.lastEdited'), false]];
   // kept for this visit only: a filter left on from an earlier day would look like lost drafts
   const draftFilter = { name: '', owner: '', pages: '' };
   const matchesFilter = (d) => (!draftFilter.name || searchable(d.name).includes(searchable(draftFilter.name)))
     && (!draftFilter.owner || searchable(d.owner).includes(searchable(draftFilter.owner)))
     && (draftFilter.pages === '' || d.pages === Number(draftFilter.pages));
-  const pagesText = (n) => (n === 0 ? 'بلا صفحات' : n === 1 ? 'صفحة واحدة' : n === 2 ? 'صفحتان' : n <= 10 ? n + ' صفحات' : n + ' صفحة');
+  const pagesText = (n) => tx('app.pageCount', { n });
   let sortBeforeClick = null;
 
   function sortDraftsBy(k, e) {
@@ -245,6 +256,20 @@
     renderDraftList();
   }
 
+  // the list reaches down to the home screen's bottom and scrolls under its header, so the screen itself doesn't
+  // scroll: more drafts show on a tall screen, fewer on a phone; never under about three rows
+  function fitDrafts() {
+    const s = document.querySelector('.draft-scroll'), home = $('viewHome');
+    if (!s || !s.offsetParent) return;  // home isn't shown
+    const top = s.getBoundingClientRect().top + home.scrollTop;  // where the list starts, home scrolled to its top
+    const pad = parseFloat(getComputedStyle(home).paddingBottom) || 0;
+    s.style.maxHeight = Math.max(200, home.getBoundingClientRect().bottom - top - pad - 2) + 'px';
+  }
+  addEventListener('resize', fitDrafts);
+  // the bars above it (an update, its notes, readers downloading) push it down when they show
+  const refitDrafts = new MutationObserver(fitDrafts);
+  for (const id of ['updateBar', 'updateNotes', 'partsBar']) refitDrafts.observe($(id), { attributes: true, attributeFilter: ['class', 'style'] });
+
   function renderDraftList() {
     const box = $('draftList');
     let table = box.querySelector('table');
@@ -252,12 +277,12 @@
       const head = DRAFT_COLS.map(([k, label, canSearch]) => el('th', { dataset: { k } }, el('div', { class: 'th-in' },
         el('button', { type: 'button', class: 'sort', onclick: (e) => sortDraftsBy(k, e),
           ondblclick: () => { if (!canSearch) return; store.set('draftSort', sortBeforeClick, true); renderDraftList(); openColFilter(k); } }),
-        canSearch ? el('button', { type: 'button', class: 'filt btn ghost small icon-only', title: 'ابحث في عمود ' + label,
-          'aria-label': 'ابحث في عمود ' + label, 'aria-expanded': 'false',
+        canSearch ? el('button', { type: 'button', class: 'filt btn ghost small icon-only', title: tx('app.searchColumn', { column: label }),
+          'aria-label': tx('app.searchColumn', { column: label }), 'aria-expanded': 'false',
           onclick: () => (colFilterFor === k ? closeColFilter(true) : openColFilter(k)) }, icon('magnifying-glass')) : null)));
       table = el('table', null, el('thead', null, el('tr', null, head, el('th', null))), el('tbody'));
-      box.replaceChildren(table, el('p', { class: 'muted draft-none hidden', id: 'draftNone' }, 'لا توجد مسودة تطابق البحث.',
-        el('button', { type: 'button', class: 'btn ghost small', onclick: clearDraftFilters }, 'مسح البحث')));
+      box.replaceChildren(el('div', { class: 'draft-scroll' }, table), el('p', { class: 'muted draft-none hidden', id: 'draftNone' }, tx('app.noDraftMatchesSearch'),
+        el('button', { type: 'button', class: 'btn ghost small', onclick: clearDraftFilters }, tx('app.clearSearch'))));
     }
 
     const [key, dir] = (store.get('draftSort') || 'updated:desc').split(':');
@@ -273,24 +298,25 @@
     }
 
     const text = key === 'name' || key === 'owner';
-    const cmp = (a, b) => (text ? (a[key] || '').localeCompare(b[key] || '', 'ar') : a[key] - b[key]) * (dir === 'asc' ? 1 : -1);
+    const cmp = (a, b) => (text ? (a[key] || '').localeCompare(b[key] || '', I18N.lang()) : a[key] - b[key]) * (dir === 'asc' ? 1 : -1);
     const shown = draftItems.filter(matchesFilter).sort(cmp);
     // whole row opens the draft; the name link (keyboard) and the delete button handle their own clicks
     table.tBodies[0].replaceChildren(...shown.map((d) => el('tr', { class: 'open-row',
       onclick: (e) => { if (!e.target.closest('a, button')) location.hash = '#/d/' + d.id; } },
-      el('td', null, el('a', { href: '#/d/' + d.id }, d.name || 'بدون اسم'),
-        el('span', { class: 'sub' }, [d.owner, pagesText(d.pages)].filter(Boolean).join('، '))),
+      el('td', null, el('a', { href: '#/d/' + d.id }, d.name || tx('app.untitled')),
+        el('span', { class: 'sub' }, d.owner ? tx('app.draftOwnerPages', { owner: d.owner, pages: pagesText(d.pages) }) : pagesText(d.pages))),
       el('td', null, d.owner || ''),
       el('td', { class: 'num' }, String(d.pages)),
       el('td', null, fmtTime(d.updated)),
-      el('td', { class: 'act' }, iconBtn('trash', 'حذف ' + (d.name || 'المسودة'), () => deleteDraft(d), 'btn ghost small icon-only danger')))));
+      el('td', { class: 'act' }, iconBtn('trash', d.name ? tx('app.deleteNamed', { name: d.name }) : tx('app.deleteDraft'), () => deleteDraft(d), 'btn ghost small icon-only danger')))));
     $('draftNone').classList.toggle('hidden', shown.length > 0);
+    fitDrafts();
 
     const active = DRAFT_COLS.filter(([k, , s]) => s && draftFilter[k] !== '');
-    $('draftCount').textContent = active.length ? `${shown.length} من ${draftItems.length}` : String(draftItems.length);
+    $('draftCount').textContent = active.length ? tx('app.shownOfAll', { shown: shown.length, all: draftItems.length }) : String(draftItems.length);
     $('draftFilters').replaceChildren(...active.map(([k, label]) => el('button', { type: 'button', class: 'chip',
-      'aria-label': `إلغاء البحث في ${label}: ${draftFilter[k]}`, onclick: () => setDraftFilter(k, '') }, `${label}: ${draftFilter[k]}`, icon('x'))),
-    active.length > 1 ? el('button', { type: 'button', class: 'btn ghost small', onclick: clearDraftFilters }, 'مسح الكل') : '');
+      'aria-label': tx('app.clearColumnSearch', { column: label, text: draftFilter[k] }), onclick: () => setDraftFilter(k, '') }, `${label}: ${draftFilter[k]}`, icon('x'))),
+    active.length > 1 ? el('button', { type: 'button', class: 'btn ghost small', onclick: clearDraftFilters }, tx('app.clearAll')) : '');
     $('draftFilters').classList.toggle('hidden', !active.length);
   }
 
@@ -327,7 +353,7 @@
   function selName(s) {
     if (s.getAttribute('aria-label')) return s.getAttribute('aria-label');
     const by = s.getAttribute('aria-labelledby'); if (by && $(by)) return $(by).textContent.trim();
-    const l = s.closest('label'); if (l) return [...l.childNodes].filter((n) => n.nodeType === 3).map((n) => n.data).join(' ').trim();
+    const l = s.closest('label'); if (l) return [...l.childNodes].filter((n) => !(n.matches && n.matches('select, input, textarea'))).map((n) => n.textContent).join(' ').trim();
     return s.title || '';
   }
   function openSelSheet(s) {
@@ -393,14 +419,24 @@
     };
     document.addEventListener('touchend', end, true); document.addEventListener('touchcancel', end, true);
   }
-  // a window closes as on its Esc; the others as on Esc, sliding on from where the finger left them
+  // the pulled sheet alone closes, the way its own close does (Esc closed every sheet open, the one under it too)
+  function closeSheet(el) {
+    const d = el.closest('details');
+    if (el.tagName === 'DIALOG') { if (el.dispatchEvent(new Event('cancel', { cancelable: true }))) el.close(); }
+    else if (el.id === 'readBar') setReadSheet(false);
+    else if (el.classList.contains('sel-sheet')) closeSelSheet(true);
+    else if (el.id === 'notePop') closeNote();
+    else if (el.id === 'linePop') closeLine();
+    else if (el.id === 'colFilter') closeColFilter(true);
+    else if (d) { d.open = false; }  // a menu (.pop) or a toolbar list (.tb-pop): already slid out by the pull
+  }
+  // sliding on from where the finger left it
   function dismissSheet(el, dy) {
     el.classList.remove('sheet-pulled');
     const out = el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(100%)' }],
       { duration: 220, easing: 'cubic-bezier(.32, .72, 0, 1)', fill: 'forwards' });
     out.onfinish = () => {
-      if (el.tagName === 'DIALOG') { if (el.dispatchEvent(new Event('cancel', { cancelable: true }))) el.close(); }
-      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      closeSheet(el);
       el.style.transform = ''; el.classList.add('sheet-gone');
       setTimeout(() => { out.cancel(); el.classList.remove('sheet-gone'); }, 320);  // after its own slide-out, if any
     };
@@ -466,15 +502,15 @@
   const searchable = (s) => (s || '').toLowerCase().replace(/[ً-ْـ]/g, '')
     .replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي');
 
-  const firstRun = () => el('div', { class: 'first-run' }, el('h3', null, 'لا توجد مسودات بعد'),
+  const firstRun = () => el('div', { class: 'first-run' }, el('h3', null, tx('app.noDraftsYet')),
     el('ol', null, [
-      ['images', 'أضف صور الصفحات', 'من الهاتف أو واتساب، بالترتيب الصحيح.'],
-      ['scan', 'اقرأ النص', 'بمحرك مجاني على الخادم، أو بالذكاء الاصطناعي بمفتاحك.'],
-      ['flag', 'راجع وأنتج الملف', 'المواضع غير الواضحة تُظلَّل مع ملاحظة، ثم يخرج الملف بالترويسة.']
+      ['images', tx('app.addPhotosPages'), tx('app.phoneWhatsappRightOrder')],
+      ['scan', tx('app.readText'), tx('app.freeReaderServerAiUsing')],
+      ['flag', tx('app.reviewExportFile'), tx('app.unclearSpotsHighlightedNoteFile')]
     ].map(([ic, t, s]) => el('li', null, icon(ic), el('div', null, el('b', null, t), el('span', { class: 'muted' }, s))))));
 
   async function deleteDraft(d) {
-    if (!(await ask(`حذف المسودة "${d.name}" وصورها نهائياً؟`, { ok: 'حذف', danger: true }))) return;
+    if (!(await ask(tx('app.deleteDraftPhotosGood', { name: d.name }), { ok: tx('app.delete'), danger: true }))) return;
     await api('/api/drafts/' + d.id, { method: 'DELETE' });
     loadDraftList();
   }
@@ -496,7 +532,7 @@
     if (draft && dirty) await saveDraft();
     destroyEditor();
     try { draft = await api('/api/drafts/' + id); }
-    catch (e) { toast('تعذر فتح المسودة: ' + e.message, true); location.hash = ''; return; }
+    catch (e) { toast(tx('app.couldntOpenDraft', { error: e.message }), true); location.hash = ''; return; }
     dirty = false; current = 0;
     $('viewHome').classList.add('hidden'); $('viewDraft').classList.remove('hidden');
     document.body.classList.add('in-draft');
@@ -524,12 +560,12 @@
   let saveError = '';  // why the last save failed; cleared by the next one that works
   function setSaveState() {
     const s = $('saveState');
-    const [state, icon, text] = saving ? ['busy', 'circle-dashed', 'جارٍ الحفظ…'] : saveError ? ['failed', 'warning-circle', 'لم يُحفظ']
-      : dirty ? ['busy', 'circle-dashed', 'لم يُحفظ بعد'] : ['saved', 'check-circle', 'محفوظ'];
+    const [state, icon, text] = saving ? ['busy', 'circle-dashed', tx('app.saving')] : saveError ? ['failed', 'warning-circle', tx('app.notSaved')]
+      : dirty ? ['busy', 'circle-dashed', tx('app.notSavedYet')] : ['saved', 'check-circle', tx('app.saved')];
     s.dataset.state = state;
     s.querySelector('use').setAttribute('href', 'vendor/icons.svg#' + icon);
     s.querySelector('span').textContent = text;
-    s.title = saveError ? saveError + '. اضغط "حفظ" للمحاولة من جديد.' : '';
+    s.title = saveError ? tx('app.pressSaveTryAgain', { error: saveError }) : '';
   }
 
   async function saveDraft() {
@@ -541,9 +577,9 @@
       const r = await api('/api/drafts/' + draft.id, jsonOpts('PUT', draft));
       draft.version = r.version; draft.updated = r.updated; dirty = false; saveError = '';
     } catch (e) {
-      saveError = e.status === 409 ? 'عدّل شخص آخر هذه المسودة في نفس الوقت' : 'تعذر الحفظ: ' + e.message;
-      if (e.status === 409) toast('عدّل شخص آخر هذه المسودة في نفس الوقت. انسخ تعديلاتك ثم أعد فتحها.', true);
-      else toast('تعذر الحفظ: ' + e.message, true);
+      saveError = e.status === 409 ? tx('app.editConflict') : tx('app.couldntSave', { error: e.message });
+      if (e.status === 409) toast(tx('app.editConflictHelp'), true);
+      else toast(tx('app.couldntSave', { error: e.message }), true);
     } finally { saving = false; setSaveState(); }
   }
 
@@ -555,10 +591,11 @@
     const list = $('pageList');
     list.replaceChildren(...draft.pages.map((p, i) => {
       const flags = countFlags(p.blocks);
-      const [stCls, stIcon, stText] = busyPages.has(p.id) ? ['busy', 'circle-notch', 'جارٍ القراءة']
-        : p.blocks ? ['read', 'check-circle', 'مقروءة'] : ['', 'circle', 'لم تُقرأ'];
+      const [stCls, stIcon, stText] = busyPages.has(p.id) ? ['busy', 'circle-notch', tx('app.stateReading')]
+        : p.blocks ? ['read', 'check-circle', tx('app.stateRead')] : ['', 'circle', tx('app.stateNotRead')];
       return el('li', { class: 'page-item' + (i === current ? ' active' : ''), draggable: 'true', title: p.file || '', tabindex: '0',
-          'aria-current': i === current ? 'true' : null, 'aria-label': `صفحة ${i + 1}، ${stText}` + (flags ? `، ${flags} مواضع معلَّمة` : ''),
+          'aria-current': i === current ? 'true' : null, 'aria-label': flags ? tx('app.pageFlaggedSpots', { page: i + 1, state: stText, n: flags })
+            : tx('app.pageState', { page: i + 1, state: stText }),
           onclick: () => showPage(i), ondblclick: () => editImage(i),
           onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); showPage(i); } },
           ondragstart: (e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-page', String(i)); },
@@ -566,18 +603,18 @@
           ondragleave: (e) => e.currentTarget.classList.remove('drop-target'),
           ondrop: (e) => { if (dragFrom == null) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('drop-target'); movePageTo(dragFrom, i); dragFrom = null; },
           ondragend: () => { dragFrom = null; } },
-        el('div', { class: 'thumb' }, el('img', { src: imgUrl(p), alt: 'صفحة ' + (i + 1), loading: 'lazy', draggable: 'false',
+        el('div', { class: 'thumb' }, el('img', { src: imgUrl(p), alt: tx('app.pageNumber', { page: i + 1 }), loading: 'lazy', draggable: 'false',
           class: (p.rotation || 0) % 180 ? 'sideways' : '', style: `transform: rotate(${p.rotation || 0}deg)` })),
         el('div', { class: 'page-meta' },
           el('span', { class: 'num' }, String(i + 1)),
           el('span', { class: 'state ' + stCls }, icon(stIcon), stText),
-          flags ? el('span', { class: 'pill', title: 'مواضع معلَّمة' }, String(flags)) : null),
+          flags ? el('span', { class: 'pill', title: tx('app.flaggedSpots') }, String(flags)) : null),
         el('div', { class: 'page-actions' },
-          iconBtn('pencil-simple', 'تحرير الصورة', () => editImage(i)),
-          iconBtn('arrow-clockwise', 'تدوير', () => rotatePage(i, 90)),
-          iconBtn('caret-up', 'نقل لأعلى', () => movePage(i, -1)),
-          iconBtn('caret-down', 'نقل لأسفل', () => movePage(i, 1)),
-          iconBtn('trash', 'حذف الصفحة', () => removePage(i), 'danger')));
+          iconBtn('pencil-simple', tx('app.editPhoto'), () => editImage(i)),
+          iconBtn('arrow-clockwise', tx('app.rotate'), () => rotatePage(i, 90)),
+          iconBtn('caret-up', tx('app.moveUp'), () => movePage(i, -1)),
+          iconBtn('caret-down', tx('app.moveDown'), () => movePage(i, 1)),
+          iconBtn('trash', tx('app.deletePage'), () => removePage(i), 'danger')));
     }));
     $('dropHint').classList.toggle('hidden', draft.pages.length > 0);
     $('pageCount').textContent = draft.pages.length ? String(draft.pages.length) : '';
@@ -613,15 +650,15 @@
         const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
         draft.pages.push({ id: uid(), image: r.name, file: it.file, fileTime: it.fileTime, rotation: 0, blocks: null, versions: [] });
         added++; renderPages();
-      } catch (e) { toast(`تعذر رفع ${it.file}: ${e.message}`, true); }
+      } catch (e) { toast(tx('app.couldntUpload', { file: it.file, error: e.message }), true); }
     }
     if (added) { markDirty(); if (draft.pages.length === added) showPage(0); }
     return added;
   }
 
   async function resortPages() {
-    if (orderMode() === 'picked') { toast('اختر طريقة ترتيب أولاً.'); return; }
-    if (!(await ask('إعادة ترتيب كل الصفحات حسب الطريقة المختارة؟', { ok: 'رتّب' }))) return;
+    if (orderMode() === 'picked') { toast(tx('app.chooseSortOrder')); return; }
+    if (!(await ask(tx('app.reorderAllPagesWay'), { ok: tx('app.reorder') }))) return;
     syncEditor();
     const cur = draft.pages[current];
     const cmp = ORDERERS[orderMode()];
@@ -635,7 +672,7 @@
     p.rotation = ((p.rotation || 0) + delta + 360) % 360;
     renderPages(); markDirty();
     if (i === current) applyPhotoTransform();
-    if (p.blocks) toast('دُوِّرت الصورة. أعد قراءة الصفحة إذا كانت القراءة السابقة سيئة.');
+    if (p.blocks) toast(tx('app.photoRotatedReadPageAgain'));
   }
 
   function editImage(i) {
@@ -657,7 +694,7 @@
   }
   function afterImageChange(i) {
     renderPages(); if (i === current) showPage(i); markDirty();
-    toast(draft.pages[i].blocks ? 'حُفظت الصورة. أعد قراءة الصفحة لتستفيد من التعديل.' : 'حُفظت الصورة.');
+    toast(draft.pages[i].blocks ? tx('app.photoSavedReadPageAgain') : tx('app.photoSaved'));
   }
 
   // drag a page thumbnail onto another to move it there
@@ -682,10 +719,15 @@
   }
 
   async function removePage(i) {
-    if (!(await ask(`حذف الصفحة ${i + 1} من المسودة؟`, { ok: 'حذف', danger: true }))) return;
+    if (!(await ask(tx('app.deletePageDraft', { page: i + 1 }), { ok: tx('app.delete'), danger: true }))) return;
     syncEditor();
+    // the editor holds the shown page: let go of it before the pages move, or showPage's syncEditor writes it into
+    // whichever page takes its place. The shown page is kept by itself, as movePageTo does.
+    destroyEditor();
+    const cur = draft.pages[current];
     draft.pages.splice(i, 1);
-    if (current >= draft.pages.length) current = Math.max(0, draft.pages.length - 1);
+    current = Math.max(0, i === current ? Math.min(i, draft.pages.length - 1) : draft.pages.indexOf(cur));
+    suggestions.clear();
     renderPages(); showPage(current); markDirty();
   }
 
@@ -701,14 +743,14 @@
     if (!p) {
       $('photoImg').removeAttribute('src'); $('photoLabel').textContent = '';
       destroyEditor();
-      $('editor').replaceChildren(el('div', { class: 'empty-hint' }, 'أضف صور الصفحات أولاً، ثم اقرأها لتظهر هنا.'));
+      $('editor').replaceChildren(el('div', { class: 'empty-hint' }, tx('app.addPhotosPagesReadThem')));
       renderFlags(); fillVersions(); updateReadState(); if (toolbar) toolbar.update(); return;  // also clears the last draft's status
     }
     $('photoImg').src = imgUrl(p);
     // the file name in its own direction box, and what follows its last Arabic word ("1.jpg") left to right,
     // so "تقرير 1.jpg" does not show as "jpg.1 تقرير"
     const name = p.file && p.file.replace(/[^\u0600-\u06FF\s][^\u0600-\u06FF]*$/, (tail) => '\u2066' + tail + '\u2069');
-    $('photoLabel').replaceChildren(`صفحة ${i + 1} من ${draft.pages.length}`, ...(name ? [' · ', el('bdi', {}, name)] : []));
+    $('photoLabel').replaceChildren(tx('app.pageOfTotal', { page: i + 1, total: draft.pages.length }), ...(name ? [' · ', el('bdi', {}, name)] : []));
     applyPhotoTransform();
     renderEditor(); fillVersions(); updateReadState();
   }
@@ -736,10 +778,10 @@
   // ------------------------------------------------------------------ engines & reading
   function fillEngineSelect() {
     const sel = $('engineSel');
-    const groups = { free: el('optgroup', { label: 'مجاني (على الخادم)' }), ai: el('optgroup', { label: 'ذكاء اصطناعي (يحتاج مفتاحاً)' }) };
+    const groups = { free: el('optgroup', { label: tx('app.freeServer') }), ai: el('optgroup', { label: tx('app.aiNeedsKey') }) };
     for (const e of ENGINES) {
       groups[e.group].append(el('option', { value: e.id, disabled: !e.available && !e.installable, title: e.reason || '' },
-        e.label + (e.available ? '' : e.installable ? ' (يحتاج تنزيلاً)' : ' (غير متاح)')));
+        e.available ? e.label : e.installable ? tx('app.readerNeedsDownload', { name: e.label }) : tx('app.readerNotAvailable', { name: e.label })));
     }
     sel.replaceChildren(groups.free, groups.ai);
     const saved = store.get('engine');
@@ -763,7 +805,7 @@
   // the Windows program: Nuqta and EasyOCR come as one download (server/parts.py); picking either offers it
   let partsWanted = null;  // the reader to switch to once they are in
   async function offerParts(engineId) {
-    if (!(await ask('يُنزَّل قارئا Nuqta و EasyOCR معاً، نحو 2 جيجابايت، ويعملان فور انتهاء التنزيل. يمكنك متابعة العمل في أثناء ذلك.', { ok: 'تنزيل' }))) return;
+    if (!(await ask(tx('app.nuqtaEasyocrReadersDownloadTogether'), { ok: tx('app.download') }))) return;
     partsWanted = engineId;
     startParts();
   }
@@ -784,35 +826,35 @@
     show('partsProg', partsBusy); show('partsStop', st.state === 'downloading');
     show('partsRetry', st.state === 'error'); show('partsClose', st.state === 'error');
     show('partsRestart', st.state === 'restart');
-    if (st.state === 'error') { $('partsText').textContent = st.error; showPartsBox(); return; }
+    if (st.state === 'error') { $('partsText').textContent = I18N.message(st.error); showPartsBox(); return; }
     if (st.state === 'restart') {
-      $('partsText').textContent = 'اكتمل التنزيل. أعد تشغيل البرنامج ليعمل Nuqta و EasyOCR.';
-      try { ENGINES = (await api('/api/engines')).engines; fillEngineSelect(); } catch (e) { /* the list stays */ }
+      $('partsText').textContent = tx('app.downloadCompleteRestartProgramNuqta');
+      try { useEngines(await api('/api/engines')); fillEngineSelect(); } catch (e) { /* the list stays */ }
       showPartsBox();
       return;
     }
     if (st.state === 'done') {
       bar.classList.add('hidden');
-      try { ENGINES = (await api('/api/engines')).engines; } catch (e) { return; }
+      try { useEngines(await api('/api/engines')); } catch (e) { return; }
       fillEngineSelect();
       if (partsWanted && ENGINES.some((e) => e.id === partsWanted && e.available)) {
         $('engineSel').value = partsWanted; store.set('engine', partsWanted, true); engineChanged();
       }
-      toast('أصبح قارئا Nuqta و EasyOCR جاهزين.');
+      toast(tx('app.nuqtaEasyocrReadersReady'));
       showPartsBox();
       return;
     }
     const mb = (n) => Math.round(n / 1048576).toLocaleString('en');
-    if (st.state === 'unpacking') { $('partsText').textContent = 'فك ضغط القرّاء الإضافيين…'; prog.removeAttribute('value'); }
-    else if (st.total) { $('partsText').textContent = `تنزيل القرّاء الإضافيين… ${mb(st.done)} من ${mb(st.total)} ميجابايت`; prog.value = st.done / st.total; }
-    else { $('partsText').textContent = 'تنزيل القرّاء الإضافيين…'; prog.removeAttribute('value'); }
+    if (st.state === 'unpacking') { $('partsText').textContent = tx('app.unpackingExtraReaders'); prog.removeAttribute('value'); }
+    else if (st.total) { $('partsText').textContent = tx('app.downloadingExtraReadersMb', { done: mb(st.done), total: mb(st.total) }); prog.value = st.done / st.total; }
+    else { $('partsText').textContent = tx('app.downloadingExtraReaders'); prog.removeAttribute('value'); }
     showPartsBox();
     setTimeout(watchParts, 1000);
   }
   function showPartsBox() {
     $('partsBox').classList.toggle('hidden', !ENGINES.some((e) => e.installable));
     $('partsInfo').textContent = partsBusy ? $('partsText').textContent
-      : 'Nuqta (الأدق للعربية، وأبطأ) و EasyOCR غير مثبتين. يُنزَّلان معاً، نحو 2 جيجابايت.';
+      : tx('app.nuqtaMostAccurateArabicSlower');
     $('btnParts').disabled = partsBusy;
   }
 
@@ -826,48 +868,64 @@
     const p = draft.pages[i]; if (!p || busyPages.has(p.id)) return false;
     const engine = opts.engine || $('engineSel').value;
     const e = ENGINES.find((x) => x.id === engine);
-    if (!e || !e.available) { toast('هذا المحرك غير متاح على الخادم.', true); return false; }
+    if (!e || !e.available) { toast(tx('app.readerIsntAvailableServer'), true); return false; }
     const key = keyFor(engine);
     if (e.key && !key && !e.serverKey) {
-      toast(e.key === 'claude' ? 'أدخل مفتاح Claude في الإعدادات أولاً.' : 'أدخل مفتاح Google Vision في الإعدادات أولاً.', true);
+      toast(e.key === 'claude' ? tx('app.enterClaudeKeySettings') : tx('app.enterGoogleVisionKeySettings'), true);
       $('dlgSettings').showModal(); return false;
     }
     if (i === current) syncEditor();
     if (p.blocks && hasEdits(p) && !opts.silent &&
-        !(await ask('للصفحة نص سابق. ستُعرض القراءة الجديدة بدلاً منه، ويبقى النص السابق في قائمة "النسخ" لتعود إليه.', { ok: 'اقرأ من جديد' }))) return false;
+        !(await ask(tx('app.pageAlreadyHasTextNew'), { ok: tx('app.readAgain') }))) return false;
     const fd = new FormData();
     fd.append('draft_id', draft.id); fd.append('image', p.image); fd.append('engine', engine);
     fd.append('rotation', String(p.rotation || 0)); fd.append('cleanup', $('cleanupSel').value);
     fd.append('model', $('modelSel').value); fd.append('skip_letterhead', $('skipLetterhead').checked ? 'true' : 'false');
     fd.append('langs', $('langsSel').value); fd.append('direction', $('dirSel').value);
     if (key) fd.append('api_key', key);
-    busyPages.add(p.id); renderPages(); updateReadState();
+    const stop = new AbortController();
+    busyPages.set(p.id, stop); renderPages(); updateReadState();
     try {
-      const r = await api('/api/ocr', { method: 'POST', body: fd });
-      if (p.blocks) pushVersion(p, p.readWith ? engineLabel(p.readWith) + ' (بعد التعديل)' : 'نسخة سابقة', p.blocks);
-      pushVersion(p, engineLabel(engine), r.blocks);
-      p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0;
+      const r = await api('/api/ocr', { method: 'POST', body: fd, signal: stop.signal });
+      if (p.blocks) pushVersion(p, p.readWith ? { engine: p.readWith, edited: true } : { kind: 'earlier' }, p.blocks);
+      pushVersion(p, { engine }, r.blocks);
+      p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0; p.docLang = r.lang;
       busyPages.delete(p.id);
       if (i === current) { renderEditor(); fillVersions(); }
-      markDirty(); renderPages(); updateReadState(`تمت القراءة في ${r.seconds} ث`);
+      markDirty(); renderPages(); updateReadState(tx('app.readInSeconds', { seconds: r.seconds }));
       return true;
     } catch (err) {
       busyPages.delete(p.id); renderPages(); updateReadState();
-      toast(`صفحة ${i + 1}: ${err.message}`, true);
+      if (err.name !== 'AbortError') toast(tx('app.pageError', { page: i + 1, error: err.message }), true);  // else stopped
       return false;
     }
   }
 
+  // reading all the unread pages, one after another; stopReading ends the run (a new run number)
+  let readRun = 0, readingAll = false;
   async function readAllUnread() {
     const todo = draft.pages.map((p, i) => i).filter((i) => !draft.pages[i].blocks);
-    if (!todo.length) { toast('كل الصفحات مقروءة.'); return true; }
+    if (!todo.length) { toast(tx('app.allPagesRead')); return true; }
+    const run = ++readRun;
     let ok = true;
-    for (const i of todo) {
-      updateReadState(`جارٍ قراءة صفحة ${i + 1}…`);
-      ok = (await readPage(i, { silent: true })) && ok;
+    readingAll = true;
+    try {
+      for (const i of todo) {
+        if (run !== readRun) return false;
+        updateReadState(tx('app.readingPage', { page: i + 1 }));
+        ok = (await readPage(i, { silent: true })) && ok;
+      }
+      return ok;
+    } finally {
+      if (run === readRun) readingAll = false;
+      updateReadState();
     }
-    updateReadState();
-    return ok;
+  }
+  // the page keeps what it had; the server finishes the reading it started and its result is dropped
+  function stopReading() {
+    readRun++; readingAll = false;
+    for (const stop of busyPages.values()) stop.abort();
+    updateReadState(); toast(tx('app.readingStopped'));
   }
 
   // add photos -> read -> produce: only the next step is the green button; tools that need a page wait for one
@@ -889,15 +947,24 @@
     const busy = p && busyPages.has(p.id);
     updateStage();
     $('btnRead').disabled = !p || busy;
-    $('readState').textContent = text || (busy ? 'جارٍ القراءة…' : p && p.readWith ? 'قُرئت بـ ' + engineLabel(p.readWith) : '');
+    $('btnStopRead').classList.toggle('hidden', !busyPages.size && !readingAll);
+    $('readState').textContent = text || (busy ? tx('app.readingNow') : p && p.readWith ? tx('app.readWith', { reader: engineLabel(p.readWith) }) : '');
     $('btnReadSheet').classList.toggle('busy', !!busy);  // phones: the reading shows on the toolbar's القراءة
     $('btnReadSheet').classList.toggle('unread', !!p && !busy && !p.blocks);
   }
 
+  // what a version is stays data ({ engine, edited } or { kind }), so its name shows in the language of the moment
   function pushVersion(p, label, blocks) {
     p.versions = p.versions || [];
     p.versions.unshift({ id: uid(), label, at: Date.now() / 1000, blocks: clone(blocks) });
     p.versions = p.versions.slice(0, 8);
+  }
+  function versionLabel(v) {
+    const w = v.label;
+    if (typeof w === 'string') return w;  // saved before 1.0.6, as text
+    if (!w || w.kind === 'earlier') return tx('app.earlierVersion');
+    if (w.kind === 'restore') return tx('app.beforeRestoring');
+    return w.edited ? tx('app.readerAfterEdits', { reader: engineLabel(w.engine) }) : engineLabel(w.engine);
   }
   function hasEdits(p) { return p.blocks && p.blocks.length; }
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -906,24 +973,24 @@
     const p = draft && draft.pages[current];
     const vs = (p && p.versions) || [];
     $('verList').replaceChildren(...(vs.length ? vs.map((v) => el('li', null,
-      el('span', null, v.label, el('small', { class: 'muted' }, fmtTime(v.at))),
+      el('span', null, versionLabel(v), el('small', { class: 'muted' }, fmtTime(v.at))),
       el('span', { class: 'ver-acts' },
-        el('button', { type: 'button', class: 'btn ghost small', onclick: () => useVersion(v) }, 'استخدام'),
-        iconBtn('trash', 'حذف هذه النسخة', () => deleteVersion(v), 'btn ghost small icon-only danger'))))
-      : [el('li', { class: 'muted' }, 'لا توجد نسخ سابقة لهذه الصفحة.')]));
+        el('button', { type: 'button', class: 'btn ghost small', onclick: () => useVersion(v) }, tx('app.use')),
+        iconBtn('trash', tx('app.deleteVersion'), () => deleteVersion(v), 'btn ghost small icon-only danger'))))
+      : [el('li', { class: 'muted' }, tx('app.pageHasNoEarlierVersions'))]));
   }
   async function deleteVersion(v) {
     const p = draft.pages[current];
-    if (!(await ask(`حذف النسخة "${v.label}"؟ لا يمكن التراجع عن ذلك.`, { ok: 'حذف', danger: true }))) return;
+    if (!(await ask(tx('app.deleteVersionCantUndone', { name: versionLabel(v) }), { ok: tx('app.delete'), danger: true }))) return;
     p.versions = (p.versions || []).filter((x) => x.id !== v.id);
     fillVersions(); markDirty();
   }
   async function useVersion(v) {
     const p = draft.pages[current];
     $('verPop').open = false;
-    if (!(await ask('سيحل نص هذه النسخة محل النص الحالي في المحرر، ويُحفظ الحالي كنسخة.', { ok: 'استخدم النسخة' }))) return;
+    if (!(await ask(tx('app.versionsTextWillReplaceCurrent'), { ok: tx('app.useVersion') }))) return;
     syncEditor();
-    pushVersion(p, 'قبل الاسترجاع', p.blocks || []);
+    pushVersion(p, { kind: 'restore' }, p.blocks || []);
     p.blocks = clone(v.blocks); renderEditor(); fillVersions(); markDirty();
   }
 
@@ -941,13 +1008,14 @@
   }
   async function readSpots(engine, boxes) {
     const p = draft.pages[current];
-    if (!p || p.readImage !== p.image) throw new Error('تغيّرت صورة الصفحة بعد قراءتها؛ اقرأ الصفحة من جديد أولاً.');
+    if (!p || p.readImage !== p.image) throw new Error(tx('app.pagePhotoChangedAfterRead'));
     const key = keyFor(engine), e = ENGINES.find((x) => x.id === engine) || {};
-    if (e.key && !key && !e.serverKey) throw new Error('أدخل مفتاح هذا القارئ في الإعدادات أولاً.');
+    if (e.key && !key && !e.serverKey) throw new Error(tx('app.enterReadersKeySettings'));
     const fd = new FormData();
     fd.append('draft_id', draft.id); fd.append('image', p.readImage); fd.append('engine', engine);
     fd.append('boxes', JSON.stringify(boxes)); fd.append('rotation', String(p.readRot || 0));
     fd.append('cleanup', $('cleanupSel').value); fd.append('langs', $('langsSel').value); fd.append('model', $('modelSel').value);
+    if (p.docLang) fd.append('doc_lang', p.docLang);  // the notes in what comes back in the page's language (/api/ocr)
     if (key) fd.append('api_key', key);
     return (await api('/api/ocr-spots', { method: 'POST', body: fd })).results;
   }
@@ -967,8 +1035,8 @@
     const host = $('editor');
     host.replaceChildren();
     if (!p.blocks) {
-      host.append(el('div', { class: 'empty-hint' }, 'لم تُقرأ هذه الصفحة بعد. اختر المحرك واضغط "اقرأ الصفحة"، أو ',
-        el('button', { type: 'button', class: 'btn small', onclick: () => { p.blocks = []; markDirty(); renderEditor(); if (pe) pe.chain().run(); } }, 'ابدأ الكتابة')));
+      host.append(el('div', { class: 'empty-hint' }, tx('app.pageIsntReadYetChoose'), ' ',
+        el('button', { type: 'button', class: 'btn small', onclick: () => { p.blocks = []; markDirty(); renderEditor(); if (pe) pe.chain().run(); } }, tx('app.startTyping'))));
     } else {
       pe = window.DocEditor.mount(host, p.blocks, {
         src: (name) => `/api/drafts/${draft.id}/images/${name}`,
@@ -1003,9 +1071,13 @@
   }
 
   // "قراءة غير مؤكدة (درجة الثقة 22%)، قارن مع الصورة الأصلية" said the same long sentence under every word
+  // the server's low-confidence note (engines/common.py) in any language, its {conf} caught
+  let lowNote = null;
   const shortNote = (note) => {
-    const m = /غير مؤكدة \(درجة الثقة (\d+)%\)/.exec(note || '');
-    return m ? `غير مؤكدة، ${m[1]}%` : note || 'بلا ملاحظة';
+    lowNote = lowNote || new RegExp(I18N.texts('doc.uncertainReadingConfidenceCompareOriginal')
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{conf\\}', '(\\d+)')).join('|'));
+    const m = lowNote.exec(note || '');
+    return m ? tx('app.uncertainPercent', { percent: m.slice(1).find(Boolean) }) : note || tx('app.noNote');
   };
 
   // second readings of flagged spots, by their photo box: { engine, text }
@@ -1023,11 +1095,11 @@
       if (s && s.text && s.text !== m.textContent) pending++;
       return el('li', null,
         el('button', { type: 'button', class: 'flag-item', title: m.dataset.note || '', onclick: () => { m.scrollIntoView({ block: 'center' }); openNote(m); } },
-          el('b', null, (m.textContent || '').slice(0, 60) || '(بدون نص)'), el('span', { class: 'why' }, shortNote(m.dataset.note))),
+          el('b', null, (m.textContent || '').slice(0, 60) || tx('app.noTextParens')), el('span', { class: 'why' }, shortNote(m.dataset.note))),
         s && s.text && s.text !== m.textContent ? el('div', { class: 'flag-suggest' },
-          el('span', null, `${engineLabel(s.engine)}: «${s.text}»`),
-          el('button', { type: 'button', class: 'btn ghost small', onclick: () => useSuggestion(m, s) }, 'استخدام')) : null);
-    }) : [el('li', { class: 'flags-empty' }, 'لا مواضع معلَّمة في هذه الصفحة. حدد نصاً واضغط "تعليم" لإضافة واحد.')]));
+          el('span', null, tx('app.readerQuote', { reader: engineLabel(s.engine), text: s.text })),
+          el('button', { type: 'button', class: 'btn ghost small', onclick: () => useSuggestion(m, s) }, tx('app.use'))) : null);
+    }) : [el('li', { class: 'flags-empty' }, tx('app.noFlaggedSpotsPageSelect'))]));
     $('flagUseAll').classList.toggle('hidden', pending < 2);
   }
   // a second reading replaces the flagged text; the flag stays until the reviewer removes it
@@ -1047,12 +1119,12 @@
     const marks = [...document.querySelectorAll('#editor mark.flag')].filter((m) => markBox(m));
     if (!marks.length) return;
     const engine = $('flagEngine').value, btn = $('flagReread');
-    btn.disabled = true; updateReadState(`جارٍ قراءة ${marks.length} موضعاً بـ ${engineLabel(engine)}…`);
+    btn.disabled = true; updateReadState(tx('app.readingSpots', { n: marks.length, reader: engineLabel(engine) }));
     try {
       const res = await readSpots(engine, marks.map(markBox));
       res.forEach((r, i) => suggestions.set(String(markBox(marks[i])), { engine, text: r.text }));
       renderFlags();
-      updateReadState(`قُرئت المواضع بـ ${engineLabel(engine)}: الاقتراحات تحت كل موضع`);
+      updateReadState(tx('app.spotsReadSuggestionsUnderEach', { reader: engineLabel(engine) }));
     } catch (e) { toast(e.message, true); updateReadState(); }
     btn.disabled = false;
   }
@@ -1065,7 +1137,7 @@
     document.querySelectorAll('mark.flag.focus').forEach((m) => m.classList.remove('focus'));
     noteMark = mark; mark.classList.add('focus');
     const note = mark.dataset.note || '';
-    $('noteStatus').textContent = note ? shortNote(note) + (shortNote(note) !== note ? '. قارنها بالصورة أدناه' : '') : 'لا ملاحظة بعد';
+    $('noteStatus').textContent = note ? (shortNote(note) !== note ? tx('app.noteComparePhoto', { note: shortNote(note) }) : shortNote(note)) : tx('app.noNoteYet');
     $('noteStatus').title = note;
     $('noteText').value = note;
     $('noteWord').value = mark.textContent;
@@ -1095,7 +1167,7 @@
   function showSuggestion(s) {
     const b = $('noteSuggest');
     b.dataset.text = s.text;
-    b.textContent = `${engineLabel(s.engine)} قرأها: «${s.text || 'بلا نص'}». اضغط لوضعها في الحقل`;
+    b.textContent = tx('app.readPressPutField', { reader: engineLabel(s.engine), text: s.text || tx('app.noText') });
     b.disabled = !s.text;
     b.classList.remove('hidden');
     placeNote();
@@ -1121,7 +1193,7 @@
   function saveNote(unflag) {
     if (!noteMark || !pe) return;
     const text = $('noteWord').value.replace(/\s+/g, ' ').trim();  // an emptied word is deleted
-    const note = $('noteText').classList.contains('hidden') ? null : ($('noteText').value.trim() || 'راجع هذا الموضع');
+    const note = $('noteText').classList.contains('hidden') ? null : ($('noteText').value.trim() || tx('app.checkSpot'));
     pe.replaceFlag(noteMark, text, { unflag, note });
     closeNote(); syncEditor(); renderFlags(); renderPages(); markDirty();
     pe.focus();  // back in the text, so Ctrl+Z undoes it
@@ -1177,15 +1249,15 @@
     const on = !previewOn();
     store.set('linePreview', on ? 'on' : 'off', true);
     if (!on) closeLine();
-    toast(on ? 'تظهر صورة السطر عند النقر في النص.' : 'أُوقفت معاينة السطر عند النقر. زر "أعد القراءة" يعرضه متى شئت.');
+    toast(on ? tx('app.clickTextSeeLinePhoto') : tx('app.linePreviewClickOffReread'));
   }
   function openLine(asked, pos) {
     const t = pe && pe.readTarget(pos), p = draft && draft.pages[current];
     const stale = !p || p.readImage !== p.image;
     if (!t || (!asked && (!t.box || stale))) { closeLine(); return; }
     closeNote();
-    const why = !t.box ? 'لا يُعرف موضع هذا النص في الصورة: قُرئت الصفحة قبل هذه الميزة، أو بقارئ ذكاء اصطناعي، أو كُتب النص يدوياً. أعد قراءة الصفحة بقارئ مجاني ليظهر موضعه.'
-      : stale ? 'تغيّرت صورة الصفحة بعد قراءتها. اقرأ الصفحة من جديد ليظهر موضع النص.' : '';
+    const why = !t.box ? tx('app.textsPlacePhotoUnknownPage')
+      : stale ? tx('app.photoChangedNoPlace') : '';
     const can = ['line', 'para', 'row'].filter((k) => t[k]);
     lineAt = { t, which: can.includes(lineWhich) ? lineWhich : t.line ? 'line' : 'para', result: null };
     $('lineWhy').textContent = why;
@@ -1194,7 +1266,7 @@
     $('lineWhich').classList.toggle('hidden', !!why || can.length < 2);
     $('linePickLine').classList.toggle('hidden', !t.line);
     $('linePickRow').classList.toggle('hidden', !t.row);
-    $('linePickPara').textContent = t.cell ? 'الخلية' : 'الفقرة';
+    $('linePickPara').textContent = t.cell ? tx('app.cell') : tx('app.paragraph');
     slideIn($('linePop')); $('linePop').classList.remove('hidden');
     if (!why) {
       const sel = $('lineEngine'), keep = sel.value;
@@ -1206,7 +1278,7 @@
   }
   function showLineTarget() {
     const at = lineAt, tg = at.t[at.which];
-    $('linePickLine').textContent = at.t.line && at.t.line.count > 1 ? `الأسطر (${at.t.line.count})` : 'السطر';
+    $('linePickLine').textContent = at.t.line && at.t.line.count > 1 ? tx('app.linesCount', { n: at.t.line.count }) : tx('app.line');
     for (const k of ['line', 'para', 'row']) $('linePick' + k[0].toUpperCase() + k.slice(1)).setAttribute('aria-pressed', String(at.which === k));
     $('lineResult').classList.add('hidden');
     at.result = null;
@@ -1239,16 +1311,18 @@
     const at = lineAt; if (!at) return;
     const tg = at.t[at.which], engine = $('lineEngine').value, btn = $('lineReadBtn');
     btn.disabled = true; $('lineUse').disabled = true;
-    $('lineText').textContent = `جارٍ القراءة بـ ${engineLabel(engine)}…`;
+    $('lineText').textContent = tx('app.readingWith', { reader: engineLabel(engine) });
     $('lineResult').classList.remove('hidden'); placeLine();
     try {
       const [r] = await readSpots(engine, [tg.box]);
       if (lineAt !== at || at.t[at.which] !== tg) return;  // closed, or switched to the other one meanwhile
       at.result = { tg, segs: r.segs || [], text: (r.text || '').trim() };
       const same = at.result.text === tg.text.trim();
-      $('lineText').textContent = at.result.text ? `${engineLabel(engine)}: «${at.result.text}»${same ? ' (مطابق للنص الحالي)' : ''}` : `لم يقرأ ${engineLabel(engine)} نصاً هنا.`;
-      if (tg.readOnly && at.result.text) $('lineText').textContent += ' قراءة الصف للمقارنة فقط؛ اقرأ الخلية نفسها لتستبدلها.';
-      $('lineUse').textContent = at.which === 'para' ? (at.t.cell ? 'استبدال الخلية' : 'استبدال الفقرة') : tg.count > 1 ? 'استبدال الأسطر' : 'استبدال السطر';
+      const reader = engineLabel(engine);
+      $('lineText').textContent = !at.result.text ? tx('app.foundNoTextHere', { reader })
+        : same ? tx('app.readerSameText', { reader, text: at.result.text }) : tx('app.readerQuote', { reader, text: at.result.text });
+      if (tg.readOnly && at.result.text) $('lineText').textContent = tx('app.rowsReadingOnlyComparingRead', { reading: $('lineText').textContent });
+      $('lineUse').textContent = at.which === 'para' ? (at.t.cell ? tx('app.replaceCell') : tx('app.replaceParagraph')) : tg.count > 1 ? tx('app.replaceLines') : tx('app.replaceLine');
       $('lineUse').classList.toggle('hidden', !!tg.readOnly);
       $('lineUse').disabled = !at.result.text || same;
     } catch (e) {
@@ -1262,7 +1336,7 @@
   function useLine() {
     const r = lineAt && lineAt.result;
     if (!r || !pe) return;
-    if (!pe.replaceRange(r.tg.from, r.tg.to, r.tg.text, r.segs)) { toast('تغيّر النص منذ القراءة. اقرأه من جديد.', true); return; }
+    if (!pe.replaceRange(r.tg.from, r.tg.to, r.tg.text, r.segs)) { toast(tx('app.textChangedReadAgain'), true); return; }
     closeLine(); syncEditor(); renderFlags(); renderPages(); markDirty();
     pe.focus();
   }
@@ -1297,10 +1371,10 @@
   }
   function copyLinePart() {
     const cut = lineCut(); if (!cut) return;
-    if (!navigator.clipboard || !window.ClipboardItem) { toast('لا يسمح هذا المتصفح بنسخ الصور.', true); return; }
+    if (!navigator.clipboard || !window.ClipboardItem) { toast(tx('app.browserDoesntAllowCopyingPictures'), true); return; }
     const png = new Promise((res) => cut.canvas.toBlob(res, 'image/png'));  // made with the click (Safari)
     navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
-      .then(() => toast('نُسخ الجزء. الصقه في النص أو في أي برنامج (Ctrl+V).'), () => toast('تعذر النسخ.', true));
+      .then(() => toast(tx('app.partCopiedPasteIntoText')), () => toast(tx('app.couldntCopy'), true));
   }
   function initLinePick() {
     // no toast for the hint (its title has it): on a phone a toast would sit over the sheet's buttons
@@ -1348,10 +1422,10 @@
         if (!pe) return;
         // a screenshot about 1000 px wide fills the page width; a small one stays small
         pe.insertBlock({ type: 'figure', attrs: { image: r.name, w: r.width, h: r.height, wFrac: +Math.max(0.1, Math.min(1, r.width / 1000)).toFixed(3), align: null } });
-      } catch (e) { toast(`${picked ? 'تعذر إدراج الصورة' : 'تعذر لصق الصورة'}: ${e.message}`, true); return; }
+      } catch (e) { toast(picked ? tx('app.couldntInsertPicture', { error: e.message }) : tx('app.couldntPastePicture', { error: e.message }), true); return; }
     }
-    const what = picked ? (files.length > 1 ? 'أُدرجت الصور.' : 'أُدرجت الصورة.') : (files.length > 1 ? 'أُلصقت الصور في النص.' : 'أُلصقت الصورة في النص.');
-    toast(files.length > 1 ? what : what + ' اضغطها لتغيير التفاف النص حولها وحجمها ومحاذاتها.');
+    const what = picked ? (files.length > 1 ? tx('app.picturesInserted') : tx('app.pictureInserted')) : (files.length > 1 ? tx('app.picturesPastedIntoText') : tx('app.picturePastedIntoText'));
+    toast(files.length > 1 ? what : tx('app.clickChangeTextWrappingSize', { done: what }));
   }
   // any picture on this computer or phone, into the text after the line the cursor is in
   let imagePick = null;
@@ -1375,16 +1449,16 @@
     if (!d || (d.getData('text/plain') || '').trim()) return;
     const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
     const files = [...(d.files || [])].filter((f) => f.type.startsWith('image/'))
-      .map((f, k) => new File([f], `ملصقة-${stamp}${k ? '-' + (k + 1) : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type, lastModified: Date.now() }));
+      .map((f, k) => new File([f], `${tx('app.pasted')}-${stamp}${k ? '-' + (k + 1) : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type, lastModified: Date.now() }));
     if (!files.length) return;
     e.preventDefault();
-    addFiles(files).then((n) => { if (n) toast(n > 1 ? `أُضيفت ${n} صفحات من الحافظة.` : 'أُضيفت الصورة صفحةً جديدة.'); });
+    addFiles(files).then((n) => { if (n) toast(tx('app.pagesAddedClipboard', { n })); });
   }
 
   // pick an area of the page photo (logo, chart, signature) and put it after the block the cursor is in
   function insertPicture() {
     const p = draft.pages[current];
-    if (!p) { toast('أضف صورة الصفحة أولاً.', true); return; }
+    if (!p) { toast(tx('app.addPagePhoto'), true); return; }
     window.ImageEditor.open({ src: imgUrl(p), rotation: p.rotation || 0, pick: true, onSave: (blob, crop) => insertFigure(blob, crop.w) });
   }
   // wFrac: the picture's share of the page width on the photo, so it comes out the same size on paper
@@ -1394,7 +1468,7 @@
     const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
     if (!pe) { p.blocks = p.blocks || []; renderEditor(); }
     pe.insertBlock({ type: 'figure', attrs: { image: r.name, w: r.width, h: r.height, wFrac: +wFrac.toFixed(3), align: null } });
-    toast('أُدرجت الصورة. اضغطها لتغيير التفاف النص حولها وحجمها ومحاذاتها.');
+    toast(tx('app.pictureInsertedClickChangeText'));
   }
 
   // Select on the photo: drag a box around a part of it, drag inside the box to move it, then copy it (to paste
@@ -1403,10 +1477,10 @@
   let sel = null;  // { key, x0, y0, x1, y1 }
   const selKey = () => { const p = draft && draft.pages[current]; return p ? p.image + '@' + (p.rotation || 0) : ''; };
   function setSelecting(on) {
-    if (on && !(draft && draft.pages[current])) { toast('أضف صورة الصفحة أولاً.', true); return; }
+    if (on && !(draft && draft.pages[current])) { toast(tx('app.addPagePhoto'), true); return; }
     $('photoFrame').classList.toggle('selecting', on);
     $('btnSelect').setAttribute('aria-pressed', on);
-    if (!on) clearSel(); else if (!sel) toast('اسحب على الصورة حول الجزء المطلوب.');
+    if (!on) clearSel(); else if (!sel) toast(tx('app.dragPhotoAroundPartNeed'));
   }
   function clearSel() { sel = null; $('selBox').classList.add('hidden'); }
   function placeSel() {
@@ -1476,63 +1550,63 @@
     return c;
   }
   function copySel() {
-    if (!navigator.clipboard || !window.ClipboardItem) { toast('لا يسمح هذا المتصفح بنسخ الصور.', true); return; }
+    if (!navigator.clipboard || !window.ClipboardItem) { toast(tx('app.browserDoesntAllowCopyingPictures'), true); return; }
     // the item is made now, with the click, and filled when the picture is ready (Safari needs it that way)
     const png = cutSel().then((c) => new Promise((res) => c.toBlob(res, 'image/png')));
     navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
-      .then(() => toast('نُسخ الجزء. الصقه في النص أو في أي برنامج (Ctrl+V).'), () => toast('تعذر النسخ.', true));
+      .then(() => toast(tx('app.partCopiedPasteIntoText')), () => toast(tx('app.couldntCopy'), true));
   }
   function flagSelection() {
     const m = pe && pe.flagSelection('');
-    if (!m) { toast('حدد نصاً في المحرر أولاً.'); return; }
+    if (!m) { toast(tx('app.selectTextEditor')); return; }
     syncEditor(); renderFlags(); markDirty(); openNote(m, true);
   }
 
   // ------------------------------------------------------------------ export
   async function exportWord(quick) {
-    if (!draft.pages.length) { toast('أضف صور الصفحات أولاً.', true); return; }
+    if (!draft.pages.length) { toast(tx('app.addPhotosFirst'), true); return; }
     syncEditor();
     if (quick) {
       $('btnQuick').disabled = true;
       try { await readAllUnread(); } finally { $('btnQuick').disabled = false; }
     }
     const unread = draft.pages.filter((p) => !p.blocks).length;
-    if (unread && !quick && !(await ask(`${unread} صفحة لم تُقرأ بعد وستكون فارغة في الملف.`, { ok: 'أنتج الملف' }))) return;
+    if (unread && !quick && !(await ask(tx('app.pagesArentReadYetWill', { n: unread }), { ok: tx('app.exportFile') }))) return;
     const tplId = $('templateSel').value;
-    if (!tplId) { toast('لا يوجد قالب ترويسة. أضف قالباً من الإعدادات.', true); return; }
+    if (!tplId) { toast(tx('app.theresNoHeaderTemplateAdd'), true); return; }
     try {
       const fmt = $('formatSel').value || 'docx';
       const bytes = await (await fetch(`/api/templates/${tplId}/file`)).arrayBuffer();
       const out = await window.DocxExport.build(bytes, { pages: draft.pages.map((p) => ({ blocks: p.blocks || [] })) }, {
-        JSZip: window.JSZip, date: isoToDMY($('draftDate').value), author: settings.author || draft.owner || 'مراجع',
+        JSZip: window.JSZip, date: isoToDMY($('draftDate').value), author: settings.author || draft.owner || tx('app.reviewer'),
         highlight: $('optHighlight').checked, pageBreaks: $('optPageBreaks').checked, fontSize: docFontSize(),
         headingSize: docFontSize() + 2, fontName: $('optFontName').value.trim(),
         // PDF and images cannot show Word comments, so notes print as numbered footnotes under the page
         notesAs: ['pdf', 'png', 'txt'].includes(fmt) && $('optMargin').checked ? 'footnotes' : 'comments',
         fetchImage: async (name) => new Uint8Array(await (await fetch(`/api/drafts/${draft.id}/images/${name}`)).arrayBuffer())
       });
-      const name = (draft.name || 'وثيقة').replace(/[\\/:*?"<>|]+/g, '-');
+      const name = (draft.name || tx('app.documentFallback')).replace(/[\\/:*?"<>|]+/g, '-');
       const docxBlob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
       if (fmt === 'docx') {
         download(docxBlob, name + '.docx');
       } else {
-        toast('جارٍ التحويل…');
+        toast(tx('app.converting'));
         const fd = new FormData();
         fd.append('file', docxBlob, 'document.docx'); fd.append('format', fmt); fd.append('name', name);
         const res = await fetch('/api/convert', { method: 'POST', body: fd });
-        if (!res.ok) { let m = 'خطأ ' + res.status; try { m = (await res.json()).error || m; } catch (e) { /* */ } throw new Error(m); }
+        if (!res.ok) { let m = tx('app.errorStatus', { status: res.status }); try { m = I18N.message(await res.json()) || m; } catch (e) { /* */ } throw new Error(m); }
         download(await res.blob(), filenameFrom(res, name + '.' + fmt));
       }
       const flags = draft.pages.reduce((n, p) => n + countFlags(p.blocks), 0);
-      toast(flags ? `تم إنتاج الملف، وفيه ${flags} موضعاً مظللاً مع ملاحظات للمراجعة.` : 'تم إنتاج الملف.');
+      toast(flags ? tx('app.fileExportedHighlightedSpotsNotes', { n: flags }) : tx('app.fileExported'));
       if (dirty) saveDraft();
-    } catch (e) { toast('تعذر إنتاج الملف: ' + e.message, true); }
+    } catch (e) { toast(tx('app.couldntExportFile', { error: e.message }), true); }
   }
 
   function fillFormats() {
     const sel = $('formatSel');
-    if (FORMATS.length) sel.replaceChildren(...FORMATS.map((f) => el('option', { value: f.id, disabled: !f.available, title: f.available ? '' : 'غير متاح على الخادم' },
-      f.label + (f.available ? '' : ' (غير متاح)'))));
+    if (FORMATS.length) sel.replaceChildren(...FORMATS.map((f) => el('option', { value: f.id, disabled: !f.available, title: f.available ? '' : tx('app.notAvailableServer') },
+      f.available ? f.label : tx('app.readerNotAvailable', { name: f.label }))));
     const saved = store.get('format');
     if (saved && FORMATS.some((f) => f.id === saved && f.available)) sel.value = saved;
   }
@@ -1553,46 +1627,61 @@
 
   function fillTemplateSelect() {
     $('templateSel').replaceChildren(...TEMPLATES.map((t) => el('option', { value: t.id }, t.name)),
-      el('option', { value: '__add' }, '+ إضافة قالب جديد…'));
+      el('option', { value: '__add' }, tx('app.addNewTemplate')));
     if (draft) $('templateSel').value = draft.template || '';
-    $('tplHead').textContent = `قوالب الترويسة (${TEMPLATES.length})`;
+    $('tplHead').textContent = tx('app.headerTemplates', { n: TEMPLATES.length });
     // the plain template ships with the program (it comes back at every start), so it is not offered for deleting
     $('tplList').replaceChildren(...TEMPLATES.map((t) => el('li', null, t.name, t.id === 'plain'
-      ? el('span', { class: 'builtin' }, 'مدمج')
-      : el('button', { type: 'button', class: 'btn ghost small danger', onclick: () => deleteTemplate(t) }, 'حذف'))));
+      ? el('span', { class: 'builtin' }, tx('app.builtIn'))
+      : el('button', { type: 'button', class: 'btn ghost small danger', onclick: () => deleteTemplate(t) }, tx('app.delete')))));
   }
   async function reloadTemplates() {
-    const tpl = await api('/api/templates'); TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired; fillTemplateSelect();
+    useTemplates(await api('/api/templates')); fillTemplateSelect();
   }
   // the add-template window; from the draft's template list the new template is chosen for the draft
   let tplForDraft = false;
   function openTemplateAdd(forDraft) {
     tplForDraft = forDraft;
-    $('tplName').value = ''; $('tplFile').value = ''; $('tplFileName').textContent = 'اختر الملف';
+    $('tplName').value = ''; $('tplFile').value = ''; $('tplFileName').textContent = tx('app.chooseFile');
     $('tplTokenWrap').classList.toggle('hidden', !TPL_ADMIN);
     $('dlgTpl').showModal(); $('tplName').focus();
   }
   async function addTemplate() {
     const f = $('tplFile').files[0], name = $('tplName').value.trim();
-    if (!f || !name) { toast('اكتب اسم القالب واختر ملف Word.', true); return; }
+    if (!f || !name) { toast(tx('app.typeTemplatesNameChooseWord'), true); return; }
     const fd = new FormData(); fd.append('name', name); fd.append('file', f); fd.append('admin_token', $('tplToken').value);
     try {
       const t = await api('/api/templates', { method: 'POST', body: fd });
-      $('dlgTpl').close(); await reloadTemplates(); toast('أضيف القالب.');
+      $('dlgTpl').close(); await reloadTemplates(); toast(tx('app.templateAdded'));
       if (tplForDraft && draft) { draft.template = t.id; $('templateSel').value = t.id; markDirty(); }
     } catch (e) { toast(e.message, true); }
   }
   async function deleteTemplate(t) {
-    if (!(await ask(`حذف قالب "${t.name}"؟`, { ok: 'حذف', danger: true }))) return;
+    if (!(await ask(tx('app.deleteTemplate', { name: t.name }), { ok: tx('app.delete'), danger: true }))) return;
     try { await api(`/api/templates/${t.id}?admin_token=${encodeURIComponent($('tplToken').value)}`, { method: 'DELETE' }); await reloadTemplates(); }
     catch (e) { toast(e.message, true); }
+  }
+  // the interface language (js/i18n.js), kept on this device. The page loads again in it, once the open draft is
+  // saved; the Windows program also keeps it for what shows before the page next time (server: /api/lang).
+  function showLang() {
+    $('setLang').replaceChildren(...I18N.languages().map((l) => el('button', {
+      type: 'button', class: 'btn small', lang: l.code, dir: l.dir, translate: 'no', 'aria-pressed': String(l.code === I18N.lang()),
+      onclick: () => setLang(l.code) }, l.name)));
+  }
+  async function setLang(lang) {
+    if (lang === I18N.lang()) return;
+    if (dirty) await saveDraft();
+    if (dirty) return;  // not saved: the page stays, and its save state says why
+    I18N.set(lang);
+    await api('/api/lang', jsonOpts('POST', { lang })).catch(() => {});  // a server or a phone has none: fine
+    location.reload();
   }
   // light, dark or the system's: applied at once and kept on this device (js/theme.js)
   function showTheme() {
     document.querySelectorAll('#setTheme button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === DocTheme.pick())));
   }
   function openSettings() {
-    showTheme();
+    showLang(); showTheme();
     $('setAuthor').value = settings.author; $('setClaude').value = settings.claudeKey;
     $('setGoogle').value = settings.googleKey; $('setRemember').checked = settings.remember;
     showPartsBox();
@@ -1604,8 +1693,8 @@
   function showUpdateBox() {
     $('updateBox').classList.toggle('hidden', !appVersion);
     if (!appVersion) return;
-    $('updateInfo').textContent = `الإصدار ${appVersion}`;
-    $('checkUpdateLabel').textContent = 'التحقق من التحديثات';
+    $('updateInfo').textContent = tx('app.version', { version: appVersion });
+    $('checkUpdateLabel').textContent = tx('app.checkUpdates');
     $('btnCheckUpdate').onclick = checkUpdateNow;
   }
   function saveSettings() {
@@ -1635,7 +1724,7 @@
     $('copyUrl').onclick = () => copyText('phoneUrl');
     $('copyPw').onclick = () => copyText('phonePw');
     $('partsRetry').onclick = startParts;
-    $('partsStop').onclick = () => api('/api/parts/stop', { method: 'POST' }).then(() => toast('أُوقف التنزيل.')).catch((e) => toast(e.message, true));
+    $('partsStop').onclick = () => api('/api/parts/stop', { method: 'POST' }).then(() => toast(tx('app.downloadStopped'))).catch((e) => toast(e.message, true));
     $('partsClose').onclick = () => $('partsBar').classList.add('hidden');
     $('partsRestart').onclick = async () => {
       if (draft && dirty) await saveDraft();
@@ -1643,12 +1732,12 @@
       api('/api/restart', { method: 'POST' }).catch((e) => { toast(e.message, true); $('partsRestart').disabled = false; });
     };
     // the browser's own "please fill out this field" speaks the browser's language, not the page's
-    $('newName').addEventListener('invalid', (e) => e.target.setCustomValidity(e.target.validity.valueMissing ? 'اكتب اسم الوثيقة أولاً.' : ''));
+    $('newName').addEventListener('invalid', (e) => e.target.setCustomValidity(e.target.validity.valueMissing ? tx('app.typeDocumentsName') : ''));
     $('newName').addEventListener('input', (e) => e.target.setCustomValidity(''));
     document.querySelectorAll('#setTheme button').forEach((b) => { b.onclick = () => { DocTheme.set(b.dataset.pick); showTheme(); }; });
     $('btnTplAdd').onclick = addTemplate;
     $('btnTplNew').onclick = () => openTemplateAdd(false);
-    $('tplFile').onchange = () => { const f = $('tplFile').files[0]; $('tplFileName').textContent = f ? f.name : 'اختر الملف'; };
+    $('tplFile').onchange = () => { const f = $('tplFile').files[0]; $('tplFileName').textContent = f ? f.name : tx('app.chooseFile'); };
     // document font and size: remembered on this computer
     $('optFont').value = store.get('fontSize') || '14';
     $('optFontName').value = store.get('fontName') || '';
@@ -1697,6 +1786,7 @@
     $('langsSel').onchange = () => store.set('langs', $('langsSel').value, true);
     $('btnRead').onclick = () => { setReadSheet(false); readPage(current); };
     $('btnReadAll').onclick = () => { setReadSheet(false); readAllUnread(); };
+    $('btnStopRead').onclick = stopReading;
     toolbar = window.DocEditor.toolbar($('fmtBar'), () => pe, {
       picture: insertPicture, pickImage, flag: flagSelection, engines: engineChoices, hasPage: () => !!(draft && draft.pages[current]),
       showLine: () => openLine(true), previewOn, togglePreview, slideOut, shutPop,
@@ -1904,7 +1994,7 @@
     PANES.forEach((p) => {
       const btn = document.querySelector(`.pane-collapse[data-pane="${p}"]`);
       btn.disabled = list.length >= 2 && !list.includes(p);
-      btn.title = btn.disabled ? 'لا يمكن طي كل الأقسام' : btn.getAttribute('aria-label');
+      btn.title = btn.disabled ? tx('app.everySectionCantFoldedOnce') : btn.getAttribute('aria-label');
     });
     applyPhotoTransform();
   }
