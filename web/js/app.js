@@ -695,8 +695,7 @@
   }
 
   function showPage(k) {
-    const before = ws.page, p = ws.show(k), i = ws.index;
-    if (p !== before) suggestions.clear();  // second readings belong to their page
+    const p = ws.show(k), i = ws.index;
     document.querySelectorAll('.page-item').forEach((n, k) => {
       n.classList.toggle('active', k === i);
       if (k === i) n.setAttribute('aria-current', 'true'); else n.removeAttribute('aria-current');
@@ -971,7 +970,7 @@
   }
   async function readSpots(engine, boxes) {
     const p = ws.page;
-    if (!p || p.readImage !== p.image) throw new Error(tx('app.pagePhotoChangedAfterRead'));
+    if (!spots.readable(p)) throw new Error(tx('app.pagePhotoChangedAfterRead'));
     const key = keyFor(engine), e = ENGINES.find((x) => x.id === engine) || {};
     if (e.key && !key && !e.serverKey) throw new Error(tx('app.enterReadersKeySettings'));
     const fd = new FormData();
@@ -1030,27 +1029,26 @@
     return m ? tx('app.uncertainPercent', { percent: m.slice(1).find(Boolean) }) : note || tx('app.noNote');
   };
 
-  // second readings of flagged spots, by their photo box: { engine, text }
-  const suggestions = new Map();
+  // whether a page can be read again in spots, and the second readings (spots.js); the flags are the editor's marks
+  const spots = window.Spots.create({ read: (p, engine, boxes) => readSpots(engine, boxes) });
+  const flagOf = (m) => ({ el: m, text: m.textContent, box: markBox(m) });
+  const pageFlags = () => [...document.querySelectorAll('#editor mark.flag')].map(flagOf);
   function renderFlags() {
-    const marks = [...document.querySelectorAll('#editor mark.flag')];
-    $('flagCount').textContent = String(marks.length);
-    const p = ws.page;
-    const readable = marks.filter((m) => markBox(m));
-    $('flagTools').classList.toggle('hidden', !readable.length || !p || p.readImage !== p.image);
+    const flags = pageFlags(), p = ws.page;
+    $('flagCount').textContent = String(flags.length);
+    const readable = flags.filter((f) => f.box);
+    $('flagTools').classList.toggle('hidden', !readable.length || !spots.readable(p));
     if (readable.length && !$('flagEngine').options.length) fillEngineChoices($('flagEngine'));
-    let pending = 0;
-    $('flagList').replaceChildren(...(marks.length ? marks.map((m) => {
-      const s = suggestions.get(String(markBox(m)));
-      if (s && s.text && s.text !== m.textContent) pending++;
+    $('flagList').replaceChildren(...(flags.length ? flags.map((f) => {
+      const m = f.el, s = spots.offer(p, f);
       return el('li', null,
         el('button', { type: 'button', class: 'flag-item', title: m.dataset.note || '', onclick: () => { m.scrollIntoView({ block: 'center' }); openNote(m); } },
           el('b', null, (m.textContent || '').slice(0, 60) || tx('app.noTextParens')), el('span', { class: 'why' }, shortNote(m.dataset.note))),
-        s && s.text && s.text !== m.textContent ? el('div', { class: 'flag-suggest' },
+        s ? el('div', { class: 'flag-suggest' },
           el('span', null, tx('app.readerQuote', { reader: engineLabel(s.engine), text: s.text })),
           el('button', { type: 'button', class: 'btn ghost small', onclick: () => useSuggestion(m, s) }, tx('app.use'))) : null);
     }) : [el('li', { class: 'flags-empty' }, tx('app.noFlaggedSpotsPageSelect'))]));
-    $('flagUseAll').classList.toggle('hidden', pending < 2);
+    $('flagUseAll').classList.toggle('hidden', spots.pending(p, flags).length < 2);
   }
   // a second reading replaces the flagged text; the flag stays until the reviewer removes it
   function useSuggestion(m, s) {
@@ -1060,19 +1058,16 @@
   }
   function useAllSuggestions() {
     if (!pe) return;
-    const items = [...document.querySelectorAll('#editor mark.flag')].map((m) => ({ el: m, s: suggestions.get(String(markBox(m))) }))
-      .filter((x) => x.s && x.s.text && x.s.text !== x.el.textContent).map((x) => ({ el: x.el, text: x.s.text }));
-    pe.replaceFlags(items);
+    pe.replaceFlags(spots.pending(ws.page, pageFlags()).map((x) => ({ el: x.flag.el, text: x.text })));
     ws.flush(); renderFlags(); renderPages(); ws.changed();
   }
   async function rereadFlags() {
-    const marks = [...document.querySelectorAll('#editor mark.flag')].filter((m) => markBox(m));
-    if (!marks.length) return;
+    const flags = pageFlags().filter((f) => f.box);
+    if (!flags.length) return;
     const engine = $('flagEngine').value, btn = $('flagReread');
-    btn.disabled = true; updateReadState(tx('app.readingSpots', { n: marks.length, reader: engineLabel(engine) }));
+    btn.disabled = true; updateReadState(tx('app.readingSpots', { n: flags.length, reader: engineLabel(engine) }));
     try {
-      const res = await readSpots(engine, marks.map(markBox));
-      res.forEach((r, i) => suggestions.set(String(markBox(marks[i])), { engine, text: r.text }));
+      await spots.reread(ws.page, engine, flags);
       renderFlags();
       updateReadState(tx('app.spotsReadSuggestionsUnderEach', { reader: engineLabel(engine) }));
     } catch (e) { toast(e.message, true); updateReadState(); }
@@ -1094,11 +1089,11 @@
     setNoteEditing(!!editNote || !note);
     const pop = $('notePop');
     const p = ws.page;
-    const canRead = !!(markBox(mark) && p && p.readImage === p.image);
+    const canRead = !!markBox(mark) && spots.readable(p);
     $('noteReread').classList.toggle('hidden', !canRead);
     $('noteSuggest').classList.add('hidden');
     if (canRead) fillEngineChoices($('noteEngine'));
-    const known = suggestions.get(String(markBox(mark)));
+    const known = spots.reading(p, flagOf(mark));
     if (known) showSuggestion(known);
     slideIn(pop); pop.classList.remove('hidden');
     placeNote();
@@ -1126,9 +1121,7 @@
     const mark = noteMark, engine = $('noteEngine').value;
     $('noteReadBtn').disabled = true;
     try {
-      const [r] = await readSpots(engine, [markBox(mark)]);
-      const s = { engine, text: r.text };
-      suggestions.set(String(markBox(mark)), s);
+      const [s] = await spots.reread(ws.page, engine, [flagOf(mark)]);
       if (noteMark === mark) showSuggestion(s);
       renderFlags();
     } catch (e) { toast(e.message, true); }
@@ -1156,7 +1149,7 @@
   async function drawCrop(cv, box, still, lineH) {
     cv.classList.add('hidden');
     const p = ws.page;
-    if (!box || !p || p.readImage !== p.image) return false;
+    if (!box || !spots.readable(p)) return false;
     const key = p.image + '@' + (p.readRot || 0);
     if (cropSrc.key !== key) {
       const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = imgUrl(p); }).catch(() => null);
@@ -1203,7 +1196,7 @@
   }
   function openLine(asked, pos) {
     const t = pe && pe.readTarget(pos), p = ws.page;
-    const stale = !p || p.readImage !== p.image;
+    const stale = !spots.readable(p);
     if (!t || (!asked && (!t.box || stale))) { closeLine(); return; }
     closeNote();
     const why = !t.box ? tx('app.textsPlacePhotoUnknownPage')
