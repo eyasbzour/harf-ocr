@@ -247,15 +247,15 @@ async def remote_login(request: Request):
 @app.get("/api/engines")
 def list_engines(request: Request):
     out = []
-    for e in engines.ENGINES:
-        ok, why = engines.availability(e["id"])
-        server_key = bool((e["key"] == "claude" and os.environ.get("ANTHROPIC_API_KEY")) or
-                          (e["key"] == "google" and os.environ.get("GOOGLE_VISION_API_KEY")))
+    for r in engines.READERS:
+        ok, why = engines.availability(r.id)
         # Nuqta and EasyOCR come as one download in the Windows program (parts.py)
-        installable = not ok and e["id"] in ("nuqta", "easyocr") and parts.offered() and not remote.is_remote(request.scope)
+        installable = not ok and r.download and parts.offered() and not remote.is_remote(request.scope)
         if installable and parts.status()["state"] == "restart":
             installable, why = False, msg("server.downloadCompleteRestartProgramReader")
-        out.append({**e, "available": ok, "reason": why or None, "serverKey": server_key, "installable": installable})
+        out.append({"id": r.id, "label": r.label, "group": r.group, "key": r.key, "cleanup": r.cleanup,
+                    "available": ok, "reason": why or None, "serverKey": bool(r.key_env and os.environ.get(r.key_env)),
+                    "installable": installable})
     return {"engines": out, "claudeModels": CLAUDE_MODELS, "lowConfidence": LOW_CONF}
 
 

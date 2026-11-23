@@ -755,8 +755,8 @@
   function engineChanged() {
     const id = $('engineSel').value;
     const e = ENGINES.find((x) => x.id === id) || {};
-    $('cleanupWrap').classList.toggle('hidden', !id.startsWith('tess-'));  // the server only cleans up for Tesseract
-    $('langsWrap').classList.toggle('hidden', !id.startsWith('tess-'));
+    $('cleanupWrap').classList.toggle('hidden', !e.cleanup);  // only Tesseract takes them: the server says which
+    $('langsWrap').classList.toggle('hidden', !e.cleanup);
     $('modelWrap').classList.toggle('hidden', id !== 'claude');
     $('skipWrap').classList.toggle('hidden', id !== 'claude');
     // every reader has the page direction now; Tesseract also its clean-up and language
