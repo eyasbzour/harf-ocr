@@ -99,7 +99,7 @@
   let draft = null;          // the open draft
   let current = 0;           // index of the page being shown
   let dirty = false, saving = false, saveTimer = null;
-  const busyPages = new Set();
+  const busyPages = new Map();  // page id -> its reading's AbortController (stopReading)
 
   // ------------------------------------------------------------------ boot
   // the Windows program checks GitHub for a newer version at start (server/updater.py); a quiet bar offers it
@@ -127,8 +127,9 @@
     $('btnUpdate').onclick = async () => {
       if (!(await ask(tx('app.versionWillDownloadedInstalledProgram', { version: u.version }), { ok: tx('app.update') }))) return;
       if (draft && dirty) await saveDraft();
-      $('btnUpdate').disabled = true; $('updateText').textContent = tx('app.downloadingUpdateProgramWillClose');
-      try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); $('btnUpdate').disabled = false; }
+      const busy = (on) => { $('btnUpdate').disabled = on; $('updateLater').disabled = on; };
+      busy(true); $('updateText').textContent = tx('app.downloadingUpdateProgramWillClose');
+      try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); busy(false); }
     };
   }
   // use on phone (the Windows program, on the PC; server/remote.py): the top bar's button shows while the link is open
@@ -859,9 +860,10 @@
     fd.append('model', $('modelSel').value); fd.append('skip_letterhead', $('skipLetterhead').checked ? 'true' : 'false');
     fd.append('langs', $('langsSel').value); fd.append('direction', $('dirSel').value);
     if (key) fd.append('api_key', key);
-    busyPages.add(p.id); renderPages(); updateReadState();
+    const stop = new AbortController();
+    busyPages.set(p.id, stop); renderPages(); updateReadState();
     try {
-      const r = await api('/api/ocr', { method: 'POST', body: fd });
+      const r = await api('/api/ocr', { method: 'POST', body: fd, signal: stop.signal });
       if (p.blocks) pushVersion(p, p.readWith ? { engine: p.readWith, edited: true } : { kind: 'earlier' }, p.blocks);
       pushVersion(p, { engine }, r.blocks);
       p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0; p.docLang = r.lang;
@@ -871,21 +873,36 @@
       return true;
     } catch (err) {
       busyPages.delete(p.id); renderPages(); updateReadState();
-      toast(tx('app.pageError', { page: i + 1, error: err.message }), true);
+      if (err.name !== 'AbortError') toast(tx('app.pageError', { page: i + 1, error: err.message }), true);  // else stopped
       return false;
     }
   }
 
+  // reading all the unread pages, one after another; stopReading ends the run (a new run number)
+  let readRun = 0, readingAll = false;
   async function readAllUnread() {
     const todo = draft.pages.map((p, i) => i).filter((i) => !draft.pages[i].blocks);
     if (!todo.length) { toast(tx('app.allPagesRead')); return true; }
+    const run = ++readRun;
     let ok = true;
-    for (const i of todo) {
-      updateReadState(tx('app.readingPage', { page: i + 1 }));
-      ok = (await readPage(i, { silent: true })) && ok;
+    readingAll = true;
+    try {
+      for (const i of todo) {
+        if (run !== readRun) return false;
+        updateReadState(tx('app.readingPage', { page: i + 1 }));
+        ok = (await readPage(i, { silent: true })) && ok;
+      }
+      return ok;
+    } finally {
+      if (run === readRun) readingAll = false;
+      updateReadState();
     }
-    updateReadState();
-    return ok;
+  }
+  // the page keeps what it had; the server finishes the reading it started and its result is dropped
+  function stopReading() {
+    readRun++; readingAll = false;
+    for (const stop of busyPages.values()) stop.abort();
+    updateReadState(); toast(tx('app.readingStopped'));
   }
 
   // add photos -> read -> produce: only the next step is the green button; tools that need a page wait for one
@@ -907,6 +924,7 @@
     const busy = p && busyPages.has(p.id);
     updateStage();
     $('btnRead').disabled = !p || busy;
+    $('btnStopRead').classList.toggle('hidden', !busyPages.size && !readingAll);
     $('readState').textContent = text || (busy ? tx('app.readingNow') : p && p.readWith ? tx('app.readWith', { reader: engineLabel(p.readWith) }) : '');
     $('btnReadSheet').classList.toggle('busy', !!busy);  // phones: the reading shows on the toolbar's القراءة
     $('btnReadSheet').classList.toggle('unread', !!p && !busy && !p.blocks);
@@ -1745,6 +1763,7 @@
     $('langsSel').onchange = () => store.set('langs', $('langsSel').value, true);
     $('btnRead').onclick = () => { setReadSheet(false); readPage(current); };
     $('btnReadAll').onclick = () => { setReadSheet(false); readAllUnread(); };
+    $('btnStopRead').onclick = stopReading;
     toolbar = window.DocEditor.toolbar($('fmtBar'), () => pe, {
       picture: insertPicture, pickImage, flag: flagSelection, engines: engineChoices, hasPage: () => !!(draft && draft.pages[current]),
       showLine: () => openLine(true), previewOn, togglePreview, slideOut, shutPop,
