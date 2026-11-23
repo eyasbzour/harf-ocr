@@ -96,9 +96,13 @@
   let ENGINES = [], CLAUDE_MODELS = [], TEMPLATES = [], TPL_ADMIN = false, FORMATS = [];
   const useEngines = (eng) => { ENGINES = eng.engines; };
   const useTemplates = (tpl) => { TEMPLATES = tpl.templates; TPL_ADMIN = tpl.adminRequired; };
-  let draft = null;          // the open draft
-  let current = 0;           // index of the page being shown
-  let dirty = false, saving = false, saveTimer = null;
+  // the open draft, the page shown, the editor's page and saving (workspace.js); draft is ws.draft, for short
+  const ws = window.Workspace.create({
+    save: (d) => api('/api/drafts/' + d.id, jsonOpts('PUT', d)),
+    onState: () => setSaveState(),
+    onFail: (e) => toast(e.status === 409 ? tx('app.editConflictHelp') : tx('app.couldntSave', { error: e.message }), true),
+  });
+  let draft = null;
   const busyPages = new Map();  // page id -> its reading's AbortController (stopReading)
 
   // ------------------------------------------------------------------ boot
@@ -134,7 +138,7 @@
     $('updateLater').onclick = () => { $('updateBar').classList.add('hidden'); openNotes(false); store.set('skipUpdate', u.version); };
     $('btnUpdate').onclick = async () => {
       if (!(await ask(tx('app.versionWillDownloadedInstalledProgram', { version: u.version }), { ok: tx('app.update') }))) return;
-      if (draft && dirty) await saveDraft();
+      if (draft && ws.dirty) await ws.save();
       const busy = (on) => { $('btnUpdate').disabled = on; $('updateLater').disabled = on; };
       busy(true); $('updateText').textContent = tx('app.downloadingUpdateProgramWillClose');
       try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); busy(false); }
@@ -211,9 +215,9 @@
 
   // ------------------------------------------------------------------ home
   async function showHome() {
-    if (draft && dirty) await saveDraft();
+    if (draft && ws.dirty) await ws.save();
     destroyEditor();
-    draft = null;
+    draft = null; ws.load(null);
     closeColFilter(false);
     $('viewDraft').classList.add('hidden'); $('viewHome').classList.remove('hidden');
     document.body.classList.remove('in-draft');
@@ -527,20 +531,18 @@
 
   // ------------------------------------------------------------------ draft open/save
   async function openDraft(id) {
-    // straight from another draft (back / forward, a link): save it and close its editor first, as going home
-    // does; its editor left open would copy its text into the new draft's first page
-    if (draft && dirty) await saveDraft();
+    // straight from another draft (back / forward, a link): save it and close its editor first, as going home does
+    if (draft && ws.dirty) await ws.save();
     destroyEditor();
     try { draft = await api('/api/drafts/' + id); }
     catch (e) { toast(tx('app.couldntOpenDraft', { error: e.message }), true); location.hash = ''; return; }
-    dirty = false; current = 0;
+    ws.load(draft);
     $('viewHome').classList.add('hidden'); $('viewDraft').classList.remove('hidden');
     document.body.classList.add('in-draft');
     $('draftName').value = draft.name || '';
     $('draftDate').value = draft.date || todayISO();
     if (!draft.template && TEMPLATES[0]) draft.template = TEMPLATES[0].id;
     $('templateSel').value = draft.template || '';
-    saveError = ''; setSaveState();
     renderPages(); showPage(0);
     setPane(draft.pages.length ? 'text' : 'pages');
   }
@@ -553,48 +555,30 @@
     if (name === 'photo') applyPhotoTransform();
   }
 
-  function markDirty() {
-    dirty = true; setSaveState();
-    clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 4000);
-  }
-  let saveError = '';  // why the last save failed; cleared by the next one that works
   function setSaveState() {
-    const s = $('saveState');
-    const [state, icon, text] = saving ? ['busy', 'circle-dashed', tx('app.saving')] : saveError ? ['failed', 'warning-circle', tx('app.notSaved')]
-      : dirty ? ['busy', 'circle-dashed', tx('app.notSavedYet')] : ['saved', 'check-circle', tx('app.saved')];
+    const s = $('saveState'), e = ws.error;  // why the last save failed; cleared by the next one that works
+    const why = e && (e.status === 409 ? tx('app.editConflict') : tx('app.couldntSave', { error: e.message }));
+    const [state, icon, text] = ws.saving ? ['busy', 'circle-dashed', tx('app.saving')] : why ? ['failed', 'warning-circle', tx('app.notSaved')]
+      : ws.dirty ? ['busy', 'circle-dashed', tx('app.notSavedYet')] : ['saved', 'check-circle', tx('app.saved')];
     s.dataset.state = state;
     s.querySelector('use').setAttribute('href', 'vendor/icons.svg#' + icon);
     s.querySelector('span').textContent = text;
-    s.title = saveError ? tx('app.pressSaveTryAgain', { error: saveError }) : '';
+    s.title = why ? tx('app.pressSaveTryAgain', { error: why }) : '';
   }
 
-  async function saveDraft() {
-    if (!draft || saving) return;
-    clearTimeout(saveTimer);
-    syncEditor();
-    saving = true; setSaveState();
-    try {
-      const r = await api('/api/drafts/' + draft.id, jsonOpts('PUT', draft));
-      draft.version = r.version; draft.updated = r.updated; dirty = false; saveError = '';
-    } catch (e) {
-      saveError = e.status === 409 ? tx('app.editConflict') : tx('app.couldntSave', { error: e.message });
-      if (e.status === 409) toast(tx('app.editConflictHelp'), true);
-      else toast(tx('app.couldntSave', { error: e.message }), true);
-    } finally { saving = false; setSaveState(); }
-  }
-
-  window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', (e) => { if (ws.dirty) { e.preventDefault(); e.returnValue = ''; } });
 
   // ------------------------------------------------------------------ pages
   function renderPages() {
     updateStage();
     const list = $('pageList');
+    const at = ws.index;
     list.replaceChildren(...draft.pages.map((p, i) => {
       const flags = countFlags(p.blocks);
       const [stCls, stIcon, stText] = busyPages.has(p.id) ? ['busy', 'circle-notch', tx('app.stateReading')]
         : p.blocks ? ['read', 'check-circle', tx('app.stateRead')] : ['', 'circle', tx('app.stateNotRead')];
-      return el('li', { class: 'page-item' + (i === current ? ' active' : ''), draggable: 'true', title: p.file || '', tabindex: '0',
-          'aria-current': i === current ? 'true' : null, 'aria-label': flags ? tx('app.pageFlaggedSpots', { page: i + 1, state: stText, n: flags })
+      return el('li', { class: 'page-item' + (i === at ? ' active' : ''), draggable: 'true', title: p.file || '', tabindex: '0',
+          'aria-current': i === at ? 'true' : null, 'aria-label': flags ? tx('app.pageFlaggedSpots', { page: i + 1, state: stText, n: flags })
             : tx('app.pageState', { page: i + 1, state: stText }),
           onclick: () => showPage(i), ondblclick: () => editImage(i),
           onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); showPage(i); } },
@@ -642,36 +626,32 @@
     if (!items.length) return 0;
     const cmp = ORDERERS[orderMode()];
     items.sort((a, b) => cmp(a, b) || a.k - b.k);
-    syncEditor();
+    ws.flush();
     let added = 0;
     for (const it of items) {
       const fd = new FormData(); fd.append('file', it.f);
       try {
         const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
-        draft.pages.push({ id: uid(), image: r.name, file: it.file, fileTime: it.fileTime, rotation: 0, blocks: null, versions: [] });
+        ws.addPages([{ id: uid(), image: r.name, file: it.file, fileTime: it.fileTime, rotation: 0, blocks: null, versions: [] }]);
         added++; renderPages();
       } catch (e) { toast(tx('app.couldntUpload', { file: it.file, error: e.message }), true); }
     }
-    if (added) { markDirty(); if (draft.pages.length === added) showPage(0); }
+    if (added && draft.pages.length === added) showPage(0);
     return added;
   }
 
   async function resortPages() {
     if (orderMode() === 'picked') { toast(tx('app.chooseSortOrder')); return; }
     if (!(await ask(tx('app.reorderAllPagesWay'), { ok: tx('app.reorder') }))) return;
-    syncEditor();
-    const cur = draft.pages[current];
-    const cmp = ORDERERS[orderMode()];
-    draft.pages = draft.pages.map((p, k) => ({ p, k })).sort((a, b) => cmp(a.p, b.p) || a.k - b.k).map((x) => x.p);
-    current = Math.max(0, draft.pages.indexOf(cur));
-    renderPages(); showPage(current); markDirty();
+    ws.sortPages(ORDERERS[orderMode()]);
+    renderPages(); showPage(Math.max(0, ws.index));
   }
 
   function rotatePage(i, delta) {
     const p = draft.pages[i]; if (!p) return;
     p.rotation = ((p.rotation || 0) + delta + 360) % 360;
-    renderPages(); markDirty();
-    if (i === current) applyPhotoTransform();
+    renderPages(); ws.changed();
+    if (i === ws.index) applyPhotoTransform();
     if (p.blocks) toast(tx('app.photoRotatedReadPageAgain'));
   }
 
@@ -693,49 +673,30 @@
     });
   }
   function afterImageChange(i) {
-    renderPages(); if (i === current) showPage(i); markDirty();
+    renderPages(); if (i === ws.index) showPage(i); ws.changed();
     toast(draft.pages[i].blocks ? tx('app.photoSavedReadPageAgain') : tx('app.photoSaved'));
   }
 
   // drag a page thumbnail onto another to move it there
   let dragFrom = null;
   function movePageTo(from, to) {
-    if (from === to || from == null || to == null) return;
-    syncEditor();
-    const cur = draft.pages[current];
-    const [p] = draft.pages.splice(from, 1);
-    draft.pages.splice(to, 0, p);
-    current = draft.pages.indexOf(cur);
-    renderPages(); markDirty();
+    if (from == null || to == null || !ws.movePage(from, to)) return;
+    renderPages();
   }
 
   function movePage(i, dir) {
-    const j = i + dir;
-    if (j < 0 || j >= draft.pages.length) return;
-    syncEditor();
-    [draft.pages[i], draft.pages[j]] = [draft.pages[j], draft.pages[i]];
-    if (current === i) current = j; else if (current === j) current = i;
-    renderPages(); markDirty();
+    if (ws.movePage(i, i + dir)) renderPages();
   }
 
   async function removePage(i) {
     if (!(await ask(tx('app.deletePageDraft', { page: i + 1 }), { ok: tx('app.delete'), danger: true }))) return;
-    syncEditor();
-    // the editor holds the shown page: let go of it before the pages move, or showPage's syncEditor writes it into
-    // whichever page takes its place. The shown page is kept by itself, as movePageTo does.
-    destroyEditor();
-    const cur = draft.pages[current];
-    draft.pages.splice(i, 1);
-    current = Math.max(0, i === current ? Math.min(i, draft.pages.length - 1) : draft.pages.indexOf(cur));
-    suggestions.clear();
-    renderPages(); showPage(current); markDirty();
+    ws.removePage(i);
+    renderPages(); showPage(Math.max(0, ws.index));
   }
 
-  function showPage(i) {
-    syncEditor();
-    if (i !== current) suggestions.clear();  // second readings belong to their page
-    current = i;
-    const p = draft.pages[i];
+  function showPage(k) {
+    const before = ws.page, p = ws.show(k), i = ws.index;
+    if (p !== before) suggestions.clear();  // second readings belong to their page
     document.querySelectorAll('.page-item').forEach((n, k) => {
       n.classList.toggle('active', k === i);
       if (k === i) n.setAttribute('aria-current', 'true'); else n.removeAttribute('aria-current');
@@ -756,7 +717,7 @@
   }
 
   function applyPhotoTransform() {
-    const p = draft && draft.pages[current]; if (!p) return;
+    const p = ws.page; if (!p) return;
     const img = $('photoImg'), z = $('zoom').value / 100, rot = p.rotation || 0;
     const frame = $('photoFrame');
     $('zoomVal').textContent = $('zoom').value + '%';
@@ -773,7 +734,7 @@
     if (img.complete && img.naturalWidth) fitted(); else img.onload = fitted;
   }
 
-  function rotate(delta) { rotatePage(current, delta); }
+  function rotate(delta) { rotatePage(ws.index, delta); }
 
   // ------------------------------------------------------------------ engines & reading
   function fillEngineSelect() {
@@ -874,7 +835,7 @@
       toast(e.key === 'claude' ? tx('app.enterClaudeKeySettings') : tx('app.enterGoogleVisionKeySettings'), true);
       $('dlgSettings').showModal(); return false;
     }
-    if (i === current) syncEditor();
+    if (p === ws.page) ws.flush();
     if (p.blocks && hasEdits(p) && !opts.silent &&
         !(await ask(tx('app.pageAlreadyHasTextNew'), { ok: tx('app.readAgain') }))) return false;
     const fd = new FormData();
@@ -887,12 +848,14 @@
     busyPages.set(p.id, stop); renderPages(); updateReadState();
     try {
       const r = await api('/api/ocr', { method: 'POST', body: fd, signal: stop.signal });
+      // the page was deleted, or another draft opened, while it was read: the reading has nowhere to go
+      if (!draft || !draft.pages.includes(p)) { busyPages.delete(p.id); updateReadState(); return false; }
       if (p.blocks) pushVersion(p, p.readWith ? { engine: p.readWith, edited: true } : { kind: 'earlier' }, p.blocks);
       pushVersion(p, { engine }, r.blocks);
       p.blocks = clone(r.blocks); p.readWith = engine; p.readImage = p.image; p.readRot = p.rotation || 0; p.docLang = r.lang;
       busyPages.delete(p.id);
-      if (i === current) { renderEditor(); fillVersions(); }
-      markDirty(); renderPages(); updateReadState(tx('app.readInSeconds', { seconds: r.seconds }));
+      if (p === ws.page) { renderEditor(); fillVersions(); }
+      ws.changed(); renderPages(); updateReadState(tx('app.readInSeconds', { seconds: r.seconds }));
       return true;
     } catch (err) {
       busyPages.delete(p.id); renderPages(); updateReadState();
@@ -931,7 +894,7 @@
   // add photos -> read -> produce: only the next step is the green button; tools that need a page wait for one
   function updateStage() {
     if (!draft) return;
-    const pages = draft.pages.length, p = draft.pages[current];
+    const pages = draft.pages.length, p = ws.page;
     const allRead = pages && draft.pages.every((x) => x.blocks);
     document.querySelector('#panePages .file-btn').classList.toggle('primary', !pages);
     $('btnRead').classList.toggle('primary', !!p && !p.blocks);
@@ -943,7 +906,7 @@
     $('photoImg').classList.toggle('hidden', !pages);
   }
   function updateReadState(text) {
-    const p = draft && draft.pages[current];
+    const p = ws.page;
     const busy = p && busyPages.has(p.id);
     updateStage();
     $('btnRead').disabled = !p || busy;
@@ -970,7 +933,7 @@
   const clone = (x) => JSON.parse(JSON.stringify(x));
 
   function fillVersions() {
-    const p = draft && draft.pages[current];
+    const p = ws.page;
     const vs = (p && p.versions) || [];
     $('verList').replaceChildren(...(vs.length ? vs.map((v) => el('li', null,
       el('span', null, versionLabel(v), el('small', { class: 'muted' }, fmtTime(v.at))),
@@ -980,25 +943,25 @@
       : [el('li', { class: 'muted' }, tx('app.pageHasNoEarlierVersions'))]));
   }
   async function deleteVersion(v) {
-    const p = draft.pages[current];
+    const p = ws.page;
     if (!(await ask(tx('app.deleteVersionCantUndone', { name: versionLabel(v) }), { ok: tx('app.delete'), danger: true }))) return;
     p.versions = (p.versions || []).filter((x) => x.id !== v.id);
-    fillVersions(); markDirty();
+    fillVersions(); ws.changed();
   }
   async function useVersion(v) {
-    const p = draft.pages[current];
+    const p = ws.page;
     $('verPop').open = false;
     if (!(await ask(tx('app.versionsTextWillReplaceCurrent'), { ok: tx('app.useVersion') }))) return;
-    syncEditor();
+    ws.flush();
     pushVersion(p, { kind: 'restore' }, p.blocks || []);
-    p.blocks = clone(v.blocks); renderEditor(); fillVersions(); markDirty();
+    p.blocks = clone(v.blocks); renderEditor(); fillVersions(); ws.changed();
   }
 
   // ------------------------------------------------------------------ a second opinion on spots of the page
   // Flagged words and paragraphs remember where they sit on the photo that was read; another engine can read
   // just those spots again (/api/ocr-spots).
   const engineChoices = () => {
-    const p = draft && draft.pages[current];
+    const p = ws.page;
     const usable = ENGINES.filter((e) => e.available);
     const pick = (usable.find((e) => p && e.id !== p.readWith && e.group === 'free') || usable[0] || {}).id;
     return usable.map((e) => [e.id, e.label, e.id === pick]);
@@ -1007,7 +970,7 @@
     sel.replaceChildren(...engineChoices().map(([id, label, on]) => el('option', { value: id, selected: on }, label)));
   }
   async function readSpots(engine, boxes) {
-    const p = draft.pages[current];
+    const p = ws.page;
     if (!p || p.readImage !== p.image) throw new Error(tx('app.pagePhotoChangedAfterRead'));
     const key = keyFor(engine), e = ENGINES.find((x) => x.id === engine) || {};
     if (e.key && !key && !e.serverKey) throw new Error(tx('app.enterReadersKeySettings'));
@@ -1022,42 +985,36 @@
   const markBox = (m) => (m && m.dataset.box ? m.dataset.box.split(',').map(Number) : null);
 
   // ------------------------------------------------------------------ editor (web/js/editor.js)
-  let pe = null;        // the current page's editor
+  let pe = null;        // the shown page's editor (bound to it in ws)
   let toolbar = null;   // the formatting toolbar, working on pe
   let flagTimer = 0;
   function destroyEditor() {
-    if (pe) { pe.destroy(); pe = null; }
+    if (pe) { ws.release(); pe.destroy(); pe = null; }  // callers flush first when its text is to be kept
     closeNote(); closeLine();
   }
   function renderEditor() {
-    const p = draft.pages[current];
+    const p = ws.page;
     destroyEditor();
     const host = $('editor');
     host.replaceChildren();
     if (!p.blocks) {
       host.append(el('div', { class: 'empty-hint' }, tx('app.pageIsntReadYetChoose'), ' ',
-        el('button', { type: 'button', class: 'btn small', onclick: () => { p.blocks = []; markDirty(); renderEditor(); if (pe) pe.chain().run(); } }, tx('app.startTyping'))));
+        el('button', { type: 'button', class: 'btn small', onclick: () => { p.blocks = []; ws.changed(); renderEditor(); if (pe) pe.chain().run(); } }, tx('app.startTyping'))));
     } else {
       pe = window.DocEditor.mount(host, p.blocks, {
         src: (name) => `/api/drafts/${draft.id}/images/${name}`,
         onChange: () => {
-          markDirty(); closeLine();  // its line may have moved or changed
+          ws.changed(); closeLine();  // its line may have moved or changed
           clearTimeout(flagTimer);
-          flagTimer = setTimeout(() => { syncEditor(); renderFlags(); renderPages(); }, 250);
+          flagTimer = setTimeout(() => { ws.flush(); renderFlags(); renderPages(); }, 250);
         },
         onState: () => { if (toolbar) toolbar.update(); },
         onPasteImage: pasteIntoText,
       });
+      ws.bind(pe);
     }
     renderFlags();
     if (toolbar) toolbar.update();
-  }
-
-  /** Copy the editor's text back into the current page's blocks. */
-  function syncEditor() {
-    if (!draft || !pe) return;
-    const p = draft.pages[current];
-    if (p && p.blocks) p.blocks = pe.getBlocks();
   }
 
   // ------------------------------------------------------------------ flags / notes
@@ -1085,7 +1042,7 @@
   function renderFlags() {
     const marks = [...document.querySelectorAll('#editor mark.flag')];
     $('flagCount').textContent = String(marks.length);
-    const p = draft && draft.pages[current];
+    const p = ws.page;
     const readable = marks.filter((m) => markBox(m));
     $('flagTools').classList.toggle('hidden', !readable.length || !p || p.readImage !== p.image);
     if (readable.length && !$('flagEngine').options.length) fillEngineChoices($('flagEngine'));
@@ -1106,14 +1063,14 @@
   function useSuggestion(m, s) {
     if (!pe || !s.text) return;
     pe.replaceFlag(m, s.text, {});
-    syncEditor(); renderFlags(); renderPages(); markDirty();
+    ws.flush(); renderFlags(); renderPages(); ws.changed();
   }
   function useAllSuggestions() {
     if (!pe) return;
     const items = [...document.querySelectorAll('#editor mark.flag')].map((m) => ({ el: m, s: suggestions.get(String(markBox(m))) }))
       .filter((x) => x.s && x.s.text && x.s.text !== x.el.textContent).map((x) => ({ el: x.el, text: x.s.text }));
     pe.replaceFlags(items);
-    syncEditor(); renderFlags(); renderPages(); markDirty();
+    ws.flush(); renderFlags(); renderPages(); ws.changed();
   }
   async function rereadFlags() {
     const marks = [...document.querySelectorAll('#editor mark.flag')].filter((m) => markBox(m));
@@ -1143,7 +1100,7 @@
     $('noteWord').value = mark.textContent;
     setNoteEditing(!!editNote || !note);
     const pop = $('notePop');
-    const p = draft.pages[current];
+    const p = ws.page;
     const canRead = !!(markBox(mark) && p && p.readImage === p.image);
     $('noteReread').classList.toggle('hidden', !canRead);
     $('noteSuggest').classList.add('hidden');
@@ -1195,7 +1152,7 @@
     const text = $('noteWord').value.replace(/\s+/g, ' ').trim();  // an emptied word is deleted
     const note = $('noteText').classList.contains('hidden') ? null : ($('noteText').value.trim() || tx('app.checkSpot'));
     pe.replaceFlag(noteMark, text, { unflag, note });
-    closeNote(); syncEditor(); renderFlags(); renderPages(); markDirty();
+    closeNote(); ws.flush(); renderFlags(); renderPages(); ws.changed();
     pe.focus();  // back in the text, so Ctrl+Z undoes it
   }
 
@@ -1205,7 +1162,7 @@
   let cropSrc = { key: '', canvas: null };
   async function drawCrop(cv, box, still, lineH) {
     cv.classList.add('hidden');
-    const p = draft.pages[current];
+    const p = ws.page;
     if (!box || !p || p.readImage !== p.image) return false;
     const key = p.image + '@' + (p.readRot || 0);
     if (cropSrc.key !== key) {
@@ -1252,7 +1209,7 @@
     toast(on ? tx('app.clickTextSeeLinePhoto') : tx('app.linePreviewClickOffReread'));
   }
   function openLine(asked, pos) {
-    const t = pe && pe.readTarget(pos), p = draft && draft.pages[current];
+    const t = pe && pe.readTarget(pos), p = ws.page;
     const stale = !p || p.readImage !== p.image;
     if (!t || (!asked && (!t.box || stale))) { closeLine(); return; }
     closeNote();
@@ -1337,7 +1294,7 @@
     const r = lineAt && lineAt.result;
     if (!r || !pe) return;
     if (!pe.replaceRange(r.tg.from, r.tg.to, r.tg.text, r.segs)) { toast(tx('app.textChangedReadAgain'), true); return; }
-    closeLine(); syncEditor(); renderFlags(); renderPages(); markDirty();
+    closeLine(); ws.flush(); renderFlags(); renderPages(); ws.changed();
     pe.focus();
   }
   // the preview as a picture in the text: the part dragged around while تحديد is on, or all of it. The part is
@@ -1367,7 +1324,7 @@
   async function insertLinePart() {
     const cut = lineCut(); if (!cut) return;
     const blob = await new Promise((res) => cut.canvas.toBlob(res, 'image/jpeg', 0.92));
-    try { await insertFigure(blob, cut.wFrac); closeLine(); syncEditor(); markDirty(); } catch (e) { toast(e.message, true); }
+    try { await insertFigure(blob, cut.wFrac); closeLine(); ws.flush(); ws.changed(); } catch (e) { toast(e.message, true); }
   }
   function copyLinePart() {
     const cut = lineCut(); if (!cut) return;
@@ -1413,7 +1370,7 @@
   // a picture on the clipboard pasted into the text goes in as a picture of the document, after the line
   // the cursor is in; pasted anywhere else in a draft, it is a new page. picked: pictures from a file instead
   async function pasteIntoText(files, picked) {
-    const p = draft.pages[current];
+    const p = ws.page;
     for (const f of files) {
       const fd = new FormData(); fd.append('file', f, f.name || 'pasted.png');
       try {
@@ -1457,13 +1414,13 @@
 
   // pick an area of the page photo (logo, chart, signature) and put it after the block the cursor is in
   function insertPicture() {
-    const p = draft.pages[current];
+    const p = ws.page;
     if (!p) { toast(tx('app.addPagePhoto'), true); return; }
     window.ImageEditor.open({ src: imgUrl(p), rotation: p.rotation || 0, pick: true, onSave: (blob, crop) => insertFigure(blob, crop.w) });
   }
   // wFrac: the picture's share of the page width on the photo, so it comes out the same size on paper
   async function insertFigure(blob, wFrac) {
-    const p = draft.pages[current];
+    const p = ws.page;
     const fd = new FormData(); fd.append('file', blob, 'figure.jpg');
     const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
     if (!pe) { p.blocks = p.blocks || []; renderEditor(); }
@@ -1475,9 +1432,9 @@
   // anywhere, the text too) or insert it in the text. The box is kept as fractions of the photo as shown (after
   // its rotation), so zooming keeps it in place; another page or another rotation drops it.
   let sel = null;  // { key, x0, y0, x1, y1 }
-  const selKey = () => { const p = draft && draft.pages[current]; return p ? p.image + '@' + (p.rotation || 0) : ''; };
+  const selKey = () => { const p = ws.page; return p ? p.image + '@' + (p.rotation || 0) : ''; };
   function setSelecting(on) {
-    if (on && !(draft && draft.pages[current])) { toast(tx('app.addPagePhoto'), true); return; }
+    if (on && !ws.page) { toast(tx('app.addPagePhoto'), true); return; }
     $('photoFrame').classList.toggle('selecting', on);
     $('btnSelect').setAttribute('aria-pressed', on);
     if (!on) clearSel(); else if (!sel) toast(tx('app.dragPhotoAroundPartNeed'));
@@ -1541,7 +1498,7 @@
   }
   // the part at the photo's full resolution (as shown: rotated), at most 3000 pixels on its long side
   async function cutSel() {
-    const p = draft.pages[current];
+    const p = ws.page;
     const full = window.ImageEditor._render(await createImageBitmap($('photoImg')), { rot90: p.rotation || 0, fine: 0, bright: 100, contrast: 100, gray: false });
     const sx = sel.x0 * full.width, sy = sel.y0 * full.height, sw = (sel.x1 - sel.x0) * full.width, sh = (sel.y1 - sel.y0) * full.height;
     const k = Math.min(1, 3000 / Math.max(sw, sh)), c = document.createElement('canvas');
@@ -1559,13 +1516,13 @@
   function flagSelection() {
     const m = pe && pe.flagSelection('');
     if (!m) { toast(tx('app.selectTextEditor')); return; }
-    syncEditor(); renderFlags(); markDirty(); openNote(m, true);
+    ws.flush(); renderFlags(); ws.changed(); openNote(m, true);
   }
 
   // ------------------------------------------------------------------ export
   async function exportWord(quick) {
     if (!draft.pages.length) { toast(tx('app.addPhotosFirst'), true); return; }
-    syncEditor();
+    ws.flush();
     if (quick) {
       $('btnQuick').disabled = true;
       try { await readAllUnread(); } finally { $('btnQuick').disabled = false; }
@@ -1599,7 +1556,7 @@
       }
       const flags = draft.pages.reduce((n, p) => n + countFlags(p.blocks), 0);
       toast(flags ? tx('app.fileExportedHighlightedSpotsNotes', { n: flags }) : tx('app.fileExported'));
-      if (dirty) saveDraft();
+      if (ws.dirty) ws.save();
     } catch (e) { toast(tx('app.couldntExportFile', { error: e.message }), true); }
   }
 
@@ -1653,7 +1610,7 @@
     try {
       const t = await api('/api/templates', { method: 'POST', body: fd });
       $('dlgTpl').close(); await reloadTemplates(); toast(tx('app.templateAdded'));
-      if (tplForDraft && draft) { draft.template = t.id; $('templateSel').value = t.id; markDirty(); }
+      if (tplForDraft && draft) { draft.template = t.id; $('templateSel').value = t.id; ws.changed(); }
     } catch (e) { toast(e.message, true); }
   }
   async function deleteTemplate(t) {
@@ -1670,8 +1627,8 @@
   }
   async function setLang(lang) {
     if (lang === I18N.lang()) return;
-    if (dirty) await saveDraft();
-    if (dirty) return;  // not saved: the page stays, and its save state says why
+    if (ws.dirty) await ws.save();
+    if (ws.dirty) return;  // not saved: the page stays, and its save state says why
     I18N.set(lang);
     await api('/api/lang', jsonOpts('POST', { lang })).catch(() => {});  // a server or a phone has none: fine
     location.reload();
@@ -1727,7 +1684,7 @@
     $('partsStop').onclick = () => api('/api/parts/stop', { method: 'POST' }).then(() => toast(tx('app.downloadStopped'))).catch((e) => toast(e.message, true));
     $('partsClose').onclick = () => $('partsBar').classList.add('hidden');
     $('partsRestart').onclick = async () => {
-      if (draft && dirty) await saveDraft();
+      if (draft && ws.dirty) await ws.save();
       $('partsRestart').disabled = true;
       api('/api/restart', { method: 'POST' }).catch((e) => { toast(e.message, true); $('partsRestart').disabled = false; });
     };
@@ -1744,13 +1701,13 @@
     $('optFont').onchange = () => store.set('fontSize', $('optFont').value, true);
     $('optFontName').onchange = () => store.set('fontName', $('optFontName').value.trim(), true);
 
-    $('draftName').oninput = () => { draft.name = $('draftName').value; markDirty(); };
-    $('draftDate').onchange = () => { draft.date = $('draftDate').value; markDirty(); };
+    $('draftName').oninput = () => { draft.name = $('draftName').value; ws.changed(); };
+    $('draftDate').onchange = () => { draft.date = $('draftDate').value; ws.changed(); };
     $('templateSel').onchange = () => {
       if ($('templateSel').value === '__add') { $('templateSel').value = draft.template || ''; openTemplateAdd(true); return; }
-      draft.template = $('templateSel').value; markDirty();
+      draft.template = $('templateSel').value; ws.changed();
     };
-    $('btnSave').onclick = saveDraft;
+    $('btnSave').onclick = () => ws.save();
     $('btnExport').onclick = () => exportWord(false);
     $('btnQuick').onclick = () => exportWord(true);
 
@@ -1764,7 +1721,7 @@
     $('orderSel').onchange = () => store.set('order', $('orderSel').value, true);
     $('btnResort').onclick = resortPages;
     $('formatSel').onchange = () => store.set('format', $('formatSel').value, true);
-    $('btnEditImg').onclick = () => editImage(current);
+    $('btnEditImg').onclick = () => editImage(ws.index);
     $('photoFrame').addEventListener('wheel', (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
@@ -1784,11 +1741,11 @@
     $('modelSel').onchange = () => store.set('model', $('modelSel').value, true);
     $('langsSel').value = store.get('langs') || 'ara+eng';
     $('langsSel').onchange = () => store.set('langs', $('langsSel').value, true);
-    $('btnRead').onclick = () => { setReadSheet(false); readPage(current); };
+    $('btnRead').onclick = () => { setReadSheet(false); readPage(ws.index); };
     $('btnReadAll').onclick = () => { setReadSheet(false); readAllUnread(); };
     $('btnStopRead').onclick = stopReading;
     toolbar = window.DocEditor.toolbar($('fmtBar'), () => pe, {
-      picture: insertPicture, pickImage, flag: flagSelection, engines: engineChoices, hasPage: () => !!(draft && draft.pages[current]),
+      picture: insertPicture, pickImage, flag: flagSelection, engines: engineChoices, hasPage: () => !!ws.page,
       showLine: () => openLine(true), previewOn, togglePreview, slideOut, shutPop,
     }, $('editorScroll'));
     $('linePickLine').onclick = () => pickLine('line'); $('linePickPara').onclick = () => pickLine('para'); $('linePickRow').onclick = () => pickLine('row');
@@ -1814,7 +1771,7 @@
     $('noteSave').onclick = () => saveNote(false); $('noteRemove').onclick = () => saveNote(true); $('noteClose').onclick = closeNote;
     $('noteWord').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveNote(false); } });
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && draft) { e.preventDefault(); saveDraft(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && draft) { e.preventDefault(); ws.save(); }
       if (e.key === 'Escape') {
         if (selFor) { closeSelSheet(true); return; }  // a list over a sheet: just the list
         closeNote(); closeLine(); closeColFilter(true);
