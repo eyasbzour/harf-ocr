@@ -687,8 +687,13 @@
   async function removePage(i) {
     if (!(await ask(tx('app.deletePageDraft', { page: i + 1 }), { ok: tx('app.delete'), danger: true }))) return;
     syncEditor();
+    // the editor holds the shown page: let go of it before the pages move, or showPage's syncEditor writes it into
+    // whichever page takes its place. The shown page is kept by itself, as movePageTo does.
+    destroyEditor();
+    const cur = draft.pages[current];
     draft.pages.splice(i, 1);
-    if (current >= draft.pages.length) current = Math.max(0, draft.pages.length - 1);
+    current = Math.max(0, i === current ? Math.min(i, draft.pages.length - 1) : draft.pages.indexOf(cur));
+    suggestions.clear();
     renderPages(); showPage(current); markDirty();
   }
 
