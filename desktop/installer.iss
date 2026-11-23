@@ -93,12 +93,12 @@ Type: files; Name: "{autoprograms}\DocScan.lnk"
 Type: files; Name: "{autodesktop}\DocScan.lnk"
 
 [Icons]
-Name: "{autoprograms}\Harf OCR"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"
-Name: "{autodesktop}\Harf OCR"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"; Tasks: desktopicon
+Name: "{autoprograms}\Harf OCR"; Filename: "{app}\HarfOCR.exe"; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"
+Name: "{autodesktop}\Harf OCR"; Filename: "{app}\HarfOCR.exe"; WorkingDir: "{app}"; IconFilename: "{app}\docscan.ico"; AppUserModelID: "Eyasbzour.DocScan"; Tasks: desktopicon
 
 [Run]
 ; also after a silent update (the program closed itself for it), so it opens again
-Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\app\desktop\app.py"""; WorkingDir: "{app}"; Description: "{cm:Open}"; Flags: nowait postinstall
+Filename: "{app}\HarfOCR.exe"; WorkingDir: "{app}"; Description: "{cm:Open}"; Flags: nowait postinstall
 
 [INI]
 ; the language setup ran in becomes the program's first language (desktop/app.py language()). A fresh install only:

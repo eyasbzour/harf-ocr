@@ -574,6 +574,7 @@
   "server.modelFilesArentServer": "The model files aren't on the server: {folder}",
   "server.arabicIsntInstalledModel": "Arabic isn't installed for this model: {missing}",
   "server.readingTesseractTimedOut": "Reading with Tesseract timed out",
+  "server.couldntReadTesseract": "Couldn't read with Tesseract: {error}",
   "reader.paddleocrRecommended": "PaddleOCR (recommended)",
   "reader.nuqtaMostAccurateArabicSlower": "Nuqta (most accurate for Arabic, slower)",
   "reader.tesseractBest": "Tesseract (best)",

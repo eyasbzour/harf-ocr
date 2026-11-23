@@ -48,6 +48,11 @@ def find_tables(img) -> tuple[list[Grid], "Image.Image"]:
     gray = np.asarray(img.convert("L"))
     H, W = gray.shape
     ink = cv2.adaptiveThreshold(255 - gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 15, -2)
+    # the desk around a photographed sheet: wide dark areas. Its edge against the sheet is long and straight but
+    # is no table line (a straightened page's four edges made it a table), so nothing next to it counts.
+    block = cv2.getStructuringElement(cv2.MORPH_RECT, (max(25, W // 20),) * 2)
+    _, dark = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    ink[cv2.dilate(cv2.morphologyEx(dark, cv2.MORPH_OPEN, block), block) > 0] = 0
     # keep only long straight strokes: longer than any letter, so text never counts as a border
     rect = cv2.getStructuringElement
     horiz = cv2.morphologyEx(ink, cv2.MORPH_OPEN, rect(cv2.MORPH_RECT, (max(30, W // 15), 1)))

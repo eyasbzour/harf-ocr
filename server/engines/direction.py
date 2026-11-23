@@ -11,7 +11,7 @@ import re
 
 from PIL import Image, ImageOps
 
-from .common import Line, Word, seg_lists
+from .common import Line, Word, each_box, seg_lists
 
 LATIN = re.compile(r"[A-Za-z]")
 ARABIC = re.compile(r"[؀-ۿ]")
@@ -95,19 +95,6 @@ def mirror_image(img: Image.Image) -> Image.Image:
 
 def unmirror_blocks(blocks: list[dict]) -> list[dict]:
     """Boxes (fractions) back to the real page, and every block marked left to right."""
-    def fix(box):
-        return [round(1 - box[2], 4), box[1], round(1 - box[0], 4), box[3]]
-
     for b in blocks:
         b["dir"] = "ltr"
-        if b.get("box"):
-            b["box"] = fix(b["box"])
-        if b.get("lines"):
-            b["lines"] = [fix(ln[:4]) + ln[4:] for ln in b["lines"]]
-        for row in b.get("cellBoxes") or []:
-            row[:] = [fix(c) if c else c for c in row]
-    for segs in seg_lists(blocks):
-        for sg in segs:
-            if sg.get("box"):
-                sg["box"] = fix(sg["box"])
-    return blocks
+    return each_box(blocks, lambda box: [round(1 - box[2], 4), box[1], round(1 - box[0], 4), box[3]])

@@ -4,7 +4,6 @@ python-multipart>=0.0.9
 pillow>=10
 numpy>=1.26
 opencv-python-headless>=4.10   # ruled-table detection for the free engines
-pytesseract>=0.3.10
 httpx>=0.27
 anthropic>=0.40
 

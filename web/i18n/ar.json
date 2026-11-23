@@ -574,6 +574,7 @@
   "server.modelFilesArentServer": "ملفات النموذج غير موجودة على الخادم: {folder}",
   "server.arabicIsntInstalledModel": "اللغة العربية غير مثبتة لهذا النموذج: {missing}",
   "server.readingTesseractTimedOut": "انتهت مهلة القراءة بـ Tesseract",
+  "server.couldntReadTesseract": "تعذرت القراءة بـ Tesseract: {error}",
   "reader.paddleocrRecommended": "PaddleOCR (موصى به)",
   "reader.nuqtaMostAccurateArabicSlower": "Nuqta (الأدق للعربية، أبطأ)",
   "reader.tesseractBest": "Tesseract (أدق)",

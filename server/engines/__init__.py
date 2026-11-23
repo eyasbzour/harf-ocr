@@ -6,7 +6,7 @@ import io
 import os
 
 from . import direction as ltr_page
-from .common import EngineError, in_language, lines_to_blocks, load_image, seg_lists  # noqa: F401
+from .common import EngineError, each_box, in_language, lines_to_blocks, load_image, page_skew, seg_lists, unturn_box  # noqa: F401
 from .emphasis import mark_bold
 from .lists import mark_list_items
 from .marks import split_marks
@@ -85,6 +85,11 @@ def _read(engine_id, image_bytes, *, rotation, cleanup, api_key, model, skip_let
                   else ai_engines.run_google(img, api_key, low_conf))
         return blocks, direction == "ltr" or (direction == "auto" and ltr_page.is_ltr_text(ltr_page.blocks_text(blocks)))
     # free engines: lines with word positions -> one shared layout step (tables, side-by-side parts, paragraphs)
+    page = img if mode == "none" else load_image(image_bytes, rotation, "none")
+    skew = 0.0 if spot else page_skew(page)
+    if skew:  # a photo taken at an angle: its lines run into each other. Read it straight; the boxes go back after.
+        rotation += skew
+        img = load_image(image_bytes, rotation, mode)
     grids, unruled = find_tables(img)
     if engine_id.startswith("tess-"):
         lines = tesseract_engine.run(unruled, engine_id[5:], langs, spot)  # it reads table cells only without the lines
@@ -96,10 +101,15 @@ def _read(engine_id, image_bytes, *, rotation, cleanup, api_key, model, skip_let
     if engine_id in ("paddle", "easyocr", "nuqta"):
         low_conf = min(low_conf, BOX_ENGINE_LOW_CONF)
         if engine_id == "paddle" and not ltr and not spot and tesseract_engine.available("best", langs)[0]:
-            # PaddleOCR drops digits inside Arabic lines: Tesseract reads the page too, for the numbers (numbers.py)
+            # PaddleOCR drops digits inside Arabic lines: Tesseract reads the page too, for the numbers (numbers.py).
+            # Only a check: when Tesseract fails or runs out of time, the page keeps PaddleOCR's reading.
             clean = load_image(image_bytes, rotation, "clean")
-            second = tesseract_engine.run(find_tables(clean)[1], "best", langs)
-            lines = check_numbers(lines, second, clean.width / img.width, grids)
+            try:
+                second = tesseract_engine.run(find_tables(clean)[1], "best", langs)
+            except EngineError as e:
+                print(f"number check skipped: {e}")
+            else:
+                lines = check_numbers(lines, second, clean.width / img.width, grids)
     colour = None
     if ltr:  # the layout steps work right to left: mirror the page for them, and back after (direction.py)
         W = img.width
@@ -107,7 +117,12 @@ def _read(engine_id, image_bytes, *, rotation, cleanup, api_key, model, skip_let
         grids = ltr_page.mirror_grids(grids, W)
         colour = ltr_page.mirror_image(img if mode == "none" else load_image(image_bytes, rotation, "none"))
         img = ltr_page.mirror_image(img)
-    done = lambda blocks: (ltr_page.unmirror_blocks(blocks) if ltr else blocks, ltr)  # noqa: E731
+    def done(blocks):
+        if ltr:
+            blocks = ltr_page.unmirror_blocks(blocks)
+        if skew:
+            blocks = each_box(blocks, lambda box: unturn_box(box, skew, page.size))
+        return blocks, ltr  # run() decides the page's language from ltr
     if spot:
         return done(lines_to_blocks(lines, low_conf, grids, img.size))
     # handwriting, signatures and stamps leave the text and come back as notes (colour needs the photo itself)
