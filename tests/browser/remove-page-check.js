@@ -32,20 +32,22 @@ async function seed(api) {
     await page.click('#askOk');
     await page.click('#btnSave'); await page.waitForTimeout(800);
   };
-  let id = await seed(page.request);
+  const ids = [];
+  let id = await seed(page.request); ids.push(id);
   // delete the page being shown: the next page keeps its own text and is shown
   await page.goto(`${BASE}/#/d/${id}`); await page.waitForSelector('#editor .ProseMirror p');
   await remove(0);
   check('deleting the shown page leaves the others as they were', JSON.stringify(await texts()) === '["second page","third page"]', JSON.stringify(await texts()));
   check('the page after it is shown', (await page.textContent('#editor .ProseMirror')).includes('second page'));
   // delete a page above the shown one: the shown page stays shown and nothing moves
-  id = await seed(page.request);
+  id = await seed(page.request); ids.push(id);
   await page.goto(`${BASE}/#/d/${id}`); await page.waitForSelector('#editor .ProseMirror p');
   await page.locator('.page-item').nth(2).click(); await page.waitForTimeout(300);
   await remove(0);
   check('deleting a page above the shown one leaves the others as they were', JSON.stringify(await texts()) === '["second page","third page"]', JSON.stringify(await texts()));
   check('the shown page stays shown', (await page.textContent('#editor .ProseMirror')).includes('third page'));
   check('no script errors', !errors.length, errors.join(' | '));
+  for (const d of ids) await page.request.delete(`${BASE}/api/drafts/${d}`);  // what it added, it deletes
   await browser.close();
   console.log(fails ? `${fails} FAILED` : 'all passed');
   process.exit(fails ? 1 : 0);

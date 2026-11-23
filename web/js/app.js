@@ -103,6 +103,13 @@
 
   // ------------------------------------------------------------------ boot
   // the Windows program checks GitHub for a newer version at start (server/updater.py); a quiet bar offers it
+  // a list shows its first n items and scrolls past them: its height ends under item n, however the items wrap
+  function capTo(box, items, n) {
+    box.style.maxHeight = '';
+    if (items.length <= n) return;
+    const pad = parseFloat(getComputedStyle(box).paddingBottom) || 0;
+    box.style.maxHeight = (items[n - 1].getBoundingClientRect().bottom - box.getBoundingClientRect().top + pad) + 'px';
+  }
   let appVersion;  // the Windows program's version; null on a server (no updates there), undefined until asked
   async function checkUpdate(tries = 4) {
     let st;
@@ -119,6 +126,7 @@
     $('updateNotes').replaceChildren(...lines.map((l) => el('li', null, l)));
     const notesBtn = $('updateNotesBtn'), openNotes = (open) => {
       $('updateNotes').classList.toggle('hidden', !open); notesBtn.setAttribute('aria-expanded', open);
+      if (open) { $('updateNotes').scrollTop = 0; capTo($('updateNotes'), $('updateNotes').children, 4); }
       notesBtn.textContent = open ? tx('app.hideDetails') : tx('app.whatsNew');
     };
     notesBtn.classList.toggle('hidden', !lines.length); openNotes(false);
@@ -248,6 +256,20 @@
     renderDraftList();
   }
 
+  // the list reaches down to the home screen's bottom and scrolls under its header, so the screen itself doesn't
+  // scroll: more drafts show on a tall screen, fewer on a phone; never under about three rows
+  function fitDrafts() {
+    const s = document.querySelector('.draft-scroll'), home = $('viewHome');
+    if (!s || !s.offsetParent) return;  // home isn't shown
+    const top = s.getBoundingClientRect().top + home.scrollTop;  // where the list starts, home scrolled to its top
+    const pad = parseFloat(getComputedStyle(home).paddingBottom) || 0;
+    s.style.maxHeight = Math.max(200, home.getBoundingClientRect().bottom - top - pad - 2) + 'px';
+  }
+  addEventListener('resize', fitDrafts);
+  // the bars above it (an update, its notes, readers downloading) push it down when they show
+  const refitDrafts = new MutationObserver(fitDrafts);
+  for (const id of ['updateBar', 'updateNotes', 'partsBar']) refitDrafts.observe($(id), { attributes: true, attributeFilter: ['class', 'style'] });
+
   function renderDraftList() {
     const box = $('draftList');
     let table = box.querySelector('table');
@@ -259,7 +281,7 @@
           'aria-label': tx('app.searchColumn', { column: label }), 'aria-expanded': 'false',
           onclick: () => (colFilterFor === k ? closeColFilter(true) : openColFilter(k)) }, icon('magnifying-glass')) : null)));
       table = el('table', null, el('thead', null, el('tr', null, head, el('th', null))), el('tbody'));
-      box.replaceChildren(table, el('p', { class: 'muted draft-none hidden', id: 'draftNone' }, tx('app.noDraftMatchesSearch'),
+      box.replaceChildren(el('div', { class: 'draft-scroll' }, table), el('p', { class: 'muted draft-none hidden', id: 'draftNone' }, tx('app.noDraftMatchesSearch'),
         el('button', { type: 'button', class: 'btn ghost small', onclick: clearDraftFilters }, tx('app.clearSearch'))));
     }
 
@@ -288,6 +310,7 @@
       el('td', null, fmtTime(d.updated)),
       el('td', { class: 'act' }, iconBtn('trash', d.name ? tx('app.deleteNamed', { name: d.name }) : tx('app.deleteDraft'), () => deleteDraft(d), 'btn ghost small icon-only danger')))));
     $('draftNone').classList.toggle('hidden', shown.length > 0);
+    fitDrafts();
 
     const active = DRAFT_COLS.filter(([k, , s]) => s && draftFilter[k] !== '');
     $('draftCount').textContent = active.length ? tx('app.shownOfAll', { shown: shown.length, all: draftItems.length }) : String(draftItems.length);
