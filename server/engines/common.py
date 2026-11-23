@@ -80,6 +80,66 @@ def invert_lightness(img: Image.Image) -> Image.Image:
     return Image.fromarray(a.astype(np.uint8))
 
 
+def page_skew(img: Image.Image, limit: float = 10) -> float:
+    """How far a photographed page is turned, in degrees: load_image(rotation=r + page_skew(...)) straightens it.
+    0 for a straight page. The angle that lines the text rows up best: its ink, row by row, is most uneven."""
+    import cv2
+
+    g = np.array(ImageOps.grayscale(img))
+    k = 800 / max(g.shape)
+    g = cv2.resize(g, None, fx=k, fy=k, interpolation=cv2.INTER_AREA) if k < 1 else g
+    # dark strokes on their surroundings only: a dark table around the sheet is not ink
+    ink = cv2.adaptiveThreshold(g, 1, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 15).astype(np.float32)
+    h, w = ink.shape
+
+    def score(a):
+        m = cv2.getRotationMatrix2D((w / 2, h / 2), a, 1)
+        return float(np.var(cv2.warpAffine(ink, m, (w, h)).sum(axis=1)))
+
+    best = max(np.arange(-limit, limit + 0.01, 0.5), key=score)
+    best = max(np.arange(best - 0.4, best + 0.41, 0.1), key=score)
+    # cv2 turns counterclockwise for a positive angle, load_image's rotation clockwise
+    return 0.0 if abs(best) < 0.5 else round(-float(best), 1)
+
+
+def unturn_box(box, angle: float, page: tuple) -> list:
+    """A box (fractions) on the page turned by angle more (load_image) back onto the page itself: the box around
+    its corners. page is the page's size (the turned one grows to hold it, as load_image's expand)."""
+    import math
+
+    a = math.radians(-angle)
+    c, s = math.cos(a), math.sin(a)
+    pw, ph = page
+    tw, th = abs(pw * c) + abs(ph * s), abs(pw * s) + abs(ph * c)
+    xs, ys = [], []
+    for fx, fy in ((box[0], box[1]), (box[2], box[1]), (box[0], box[3]), (box[2], box[3])):
+        x, y = fx * tw - tw / 2, fy * th - th / 2
+        xs.append((c * x - s * y + pw / 2) / pw)
+        ys.append((s * x + c * y + ph / 2) / ph)
+    return [round(min(max(v, 0), 1), 4) for v in (min(xs), min(ys), max(xs), max(ys))]
+
+
+def each_box(blocks: list[dict], fix) -> list[dict]:
+    """Every box in the blocks (a block's, its lines', its words', a table's cells) through fix."""
+    def segs(ss):
+        for sg in ss or []:
+            if sg.get("box"):
+                sg["box"] = fix(sg["box"])
+
+    for b in blocks:
+        if b.get("box"):
+            b["box"] = fix(b["box"])
+        if b.get("lines"):
+            b["lines"] = [fix(ln[:4]) + ln[4:] for ln in b["lines"]]
+        segs(b.get("segs"))
+        for row in b.get("cellBoxes") or []:
+            row[:] = [fix(c) if c else c for c in row]
+        for row in b.get("rows") or []:
+            for cell in row:
+                segs(cell)
+    return blocks
+
+
 def otsu_threshold(gray: Image.Image) -> int:
     hist = gray.histogram()[:256]
     total = sum(hist)
@@ -500,6 +560,8 @@ def fragments_to_lines(frags: list[tuple[list, str, float]]) -> list[Line]:
     """
     items = []
     for box, text, conf in frags:
+        if not text or not str(text).strip():  # a box with nothing read in it (the edge of a photographed sheet,
+            continue                           # taller than the page's text) would pull lines together
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
         items.append({"x0": min(xs), "x1": max(xs), "y0": min(ys), "y1": max(ys), "text": text, "conf": None if conf is None else conf * 100})

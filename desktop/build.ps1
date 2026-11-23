@@ -58,6 +58,16 @@ Set-Content (Join-Path $App "desktop\VERSION") $Version -Encoding ascii
 if ($LASTEXITCODE) { throw "compileall" }
 & $Py (Join-Path $PSScriptRoot "make_icon.py") (Join-Path $Dist "docscan.ico")
 
+Step "HarfOCR.exe (desktop\launcher.cpp)"
+# zig's C++ compiler from pip, kept out of the program's own Python
+$zig = Join-Path $Build "zig"
+if (-not (Test-Path $zig)) { & $Py -m pip install --no-warn-script-location -q --target $zig ziglang; if ($LASTEXITCODE) { throw "ziglang" } }
+Set-Content (Join-Path $Build "launcher.rc") "1 ICON `"$((Join-Path $Dist 'docscan.ico') -replace '\\', '/')`"" -Encoding ascii
+& $Py -c "import sys; sys.path.insert(0, sys.argv[1]); import runpy; sys.argv = ['zig'] + sys.argv[2:]; runpy.run_module('ziglang', run_name='__main__')" `
+    $zig c++ -std=c++17 -O2 -municode "-Wl,--subsystem,windows" -target x86_64-windows-gnu -o (Join-Path $Dist "HarfOCR.exe") `
+    (Join-Path $PSScriptRoot "launcher.cpp") (Join-Path $Build "launcher.rc")
+if ($LASTEXITCODE) { throw "HarfOCR.exe" }
+
 if (-not $SkipTesseract) {
     Step "Tesseract"
     $tsrc = if ($env:TESSERACT_DIR) { $env:TESSERACT_DIR } else { "C:\Program Files\Tesseract-OCR" }

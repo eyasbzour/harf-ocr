@@ -1,4 +1,6 @@
-"""Pure-logic checks (no Tesseract, LibreOffice or network). Run from server/:  python -m pytest tests -q"""
+"""Pure-logic checks (no LibreOffice or network; the Tesseract one skips without it). Run from server/:  python -m pytest tests -q"""
+import os
+
 import pytest
 
 import convert
@@ -167,10 +169,17 @@ def test_numbers_paddle_dropped_come_from_tesseract_flagged():
     tess = [Line([w("الرقم:", (1800, 200, 2000, 260)), w("م", (1720, 200, 1780, 260)), w("ض", (1680, 200, 1710, 260)),
                   w("245", (1560, 200, 1660, 260)), w("2026", (1400, 200, 1540, 260))], 1400, 200, 2000, 260)]
     out = check_numbers(paddle, tess, 2.0)
-    assert [x.text for x in out[0].words] == ["الرقم:", "م", "ض", "245", "2026"]
+    assert [x.text for x in out[0].words] == ["الرقم", "م", "ض", "245", "2026"]  # PaddleOCR's words, its "ض4/" without the 4
     assert [x.note for x in out[0].words][-2:] == [NOTE, NOTE] and out[1] is paddle[1]
     segs = words_to_segs(out[0].words, 65)
     assert [s.get("note") for s in segs if s.get("note")] == [NOTE, NOTE]
+    # a piece read as one box: the number goes in where it stands, PaddleOCR's own words stay
+    one = (200, 500, 1000, 540)
+    paddle = [Line([w(t, one) for t in ("يبدأ", "الدوام", "الساعة", "صباحاً")], 200, 500, 1000, 540)]
+    tess = [Line([w("يبدأ", (1880, 1000, 2000, 1080)), w("الدوام", (1700, 1000, 1860, 1080)),
+                  w("1/12/2026", (1200, 1000, 1500, 1080)), w("الساعة", (900, 1000, 1150, 1080)), w("Coal", (600, 1000, 850, 1080))],
+                 400, 1000, 2000, 1080)]
+    assert [x.text for x in check_numbers(paddle, tess, 2.0)[0].words] == ["يبدأ", "الدوام", "1/12/2026", "الساعة", "صباحاً"]
 
 
 def test_list_items_from_bullets_numbers_and_a_skipped_bullet():
@@ -254,3 +263,44 @@ def test_kashida_inside_a_word_goes_but_after_a_prefix_stays():
     assert clean_word("الــمـوضـوع") == "الموضوع"
     assert clean_word("بـ") == "بـ"
     assert clean_word("‏سـلام") == "سلام"
+
+
+def test_paddle_page_survives_a_failed_number_check(monkeypatch):
+    import io
+
+    from PIL import Image
+
+    import engines
+    from engines import paddle_engine, tesseract_engine
+
+    def timeout(*a, **k):
+        raise EngineError("انتهت مهلة القراءة بـ Tesseract")
+
+    line = Line([Word("السلام", 95, (400, 50, 500, 80)), Word("عليكم", 95, (300, 50, 390, 80))], 300, 50, 500, 80)
+    monkeypatch.setattr(engines, "availability", lambda e: (True, ""))
+    monkeypatch.setattr(paddle_engine, "run", lambda img, lang="ar": [line])
+    monkeypatch.setattr(tesseract_engine, "available", lambda *a: (True, ""))
+    monkeypatch.setattr(tesseract_engine, "run", timeout)
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 200), "white").save(buf, "PNG")
+    blocks = engines.run("paddle", buf.getvalue(), direction="rtl")
+    assert "السلام" in str(blocks)
+
+
+def test_tesseract_models_in_a_folder_with_a_space(tmp_path):
+    # the Windows program lives in "Programs\Harf OCR": the model folder's path has a space
+    import shutil
+
+    from PIL import Image, ImageDraw
+
+    from engines import tesseract_engine
+
+    src = tesseract_engine._dir("fast")
+    if not shutil.which("tesseract") or not src or not os.path.isdir(src):
+        pytest.skip("no tesseract")
+    models = tmp_path / "Harf OCR" / "fast"
+    shutil.copytree(src, models)
+    img = Image.new("RGB", (900, 160), "white")
+    ImageDraw.Draw(img).text((40, 50), "HELLO WORLD 2026", fill="black", font_size=48)
+    words = [w.text for ln in tesseract_engine._read(img, "eng", str(models), 6) for w in ln.words]
+    assert "2026" in words

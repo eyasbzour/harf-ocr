@@ -1,6 +1,7 @@
 """Tesseract (free, runs on the server). Three model choices: fast / standard / best."""
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import subprocess
@@ -79,15 +80,24 @@ def _confident_chars(lines: list[Line]) -> int:
 
 
 def _read(img, langs: str, dir_: str, psm: int) -> list[Line]:
-    import pytesseract
-
-    config = f"--oem 1 --psm {psm} -c preserve_interword_spaces=1"
-    if dir_:
-        config += f' --tessdata-dir "{dir_}"'
+    # tesseract itself, with a list of arguments: pytesseract takes them as one string and, on Windows, keeps the
+    # quotes around a folder with a space in it ("Harf OCR"), so tesseract could not find its models
+    cmd = ["tesseract", "stdin", "stdout", "-l", langs, "--oem", "1", "--psm", str(psm),
+           "-c", "preserve_interword_spaces=1", "-c", "tessedit_create_tsv=1", "-c", "tessedit_create_txt=0"]
+    cmd += ["--tessdata-dir", dir_] if dir_ else []  # (the "tsv" config file is looked up there, so the -c above)
+    png = io.BytesIO()
+    img.save(png, "PNG")
     try:
-        d = pytesseract.image_to_data(img, lang=langs, config=config, output_type=pytesseract.Output.DICT, timeout=180)
-    except RuntimeError as e:  # timeout
+        r = subprocess.run(cmd, input=png.getvalue(), capture_output=True, timeout=180)
+    except subprocess.TimeoutExpired as e:
         raise EngineError("انتهت مهلة القراءة بـ Tesseract") from e
+    if r.returncode:
+        err = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise EngineError("تعذرت القراءة بـ Tesseract: " + (err[-1] if err else str(r.returncode)))
+    rows = [ln.split("\t") for ln in r.stdout.decode("utf-8", "replace").splitlines()[1:]]
+    cols = ("level", "page_num", "block_num", "par_num", "line_num", "word_num", "left", "top", "width", "height", "conf")
+    d = {c: [int(row[i]) if c != "conf" else row[i] for row in rows if len(row) == 12] for i, c in enumerate(cols)}
+    d["text"] = [row[11] for row in rows if len(row) == 12]
 
     lines: dict = {}
     order = []
