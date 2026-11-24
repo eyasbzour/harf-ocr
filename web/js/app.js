@@ -1638,6 +1638,22 @@
     return m ? decodeURIComponent(m[1]) : fallback;
   }
 
+  // the keys that work, each with what it does: the app's own (below) and the text editor's (TipTap's StarterKit and
+  // TextAlign, editor.js mount)
+  const keys = () => [
+    [tx('keys.save'), ['Ctrl', 'S']], [tx('keys.close'), ['Esc']], [tx('keys.zoom'), ['Ctrl', tx('keys.wheel')]],
+    [tx('keys.bold'), ['Ctrl', 'B']], [tx('keys.italic'), ['Ctrl', 'I']], [tx('keys.underline'), ['Ctrl', 'U']],
+    [tx('keys.strike'), ['Ctrl', 'Shift', 'S']], [tx('keys.undo'), ['Ctrl', 'Z']], [tx('keys.redo'), ['Ctrl', 'Y']],
+    [tx('keys.heading'), ['Ctrl', 'Alt', '1 / 2 / 3']], [tx('keys.paragraph'), ['Ctrl', 'Alt', '0']],
+    [tx('keys.bullets'), ['Ctrl', 'Shift', '8']], [tx('keys.numbers'), ['Ctrl', 'Shift', '7']],
+    [tx('keys.align'), ['Ctrl', 'Shift', 'R / E / L / J']], [tx('keys.lineBreak'), ['Shift', 'Enter']], [tx('keys.thisList'), ['?']],
+  ];
+  function showKeys() {
+    $('keysList').replaceChildren(...keys().flatMap(([what, ks]) => [
+      el('dt', { dir: 'ltr' }, ...ks.flatMap((k, i) => (i ? [' + ', el('kbd', null, k)] : [el('kbd', null, k)]))), el('dd', null, what)]));
+    $('dlgKeys').showModal();
+  }
+
   // ------------------------------------------------------------------ templates & settings
   // the document's base text size in points (any size the user types; 14 when empty or out of range)
   const docFontSize = () => { const n = parseFloat($('optFont').value); return n >= 6 && n <= 72 ? n : 14; };
@@ -1736,6 +1752,7 @@
     $('setRemember').addEventListener('change', saveSettings);
     $('btnParts').onclick = () => { $('dlgSettings').close(); offerParts('nuqta'); };
     $('btnPhone').onclick = () => { refreshPhone(); $('dlgPhone').showModal(); };
+    $('btnKeys').onclick = () => { $('dlgSettings').close(); showKeys(); };
     $('phoneStart').onclick = () => phoneAction('/api/remote/start');
     $('phoneStop').onclick = () => phoneAction('/api/remote/stop');
     $('copyUrl').onclick = () => copyText('phoneUrl');
@@ -1832,6 +1849,7 @@
     $('noteWord').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveNote(false); } });
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && draft) { e.preventDefault(); ws.save(); }
+      if (e.key === '?' && !e.target.closest('input, textarea, select, [contenteditable="true"]') && !document.querySelector('dialog[open]')) showKeys();
       if (e.key === 'Escape') {  // the window on top only: a list over a menu closes, the menu stays
         const top = topSheet(); if (!top) return;
         closeSheet(top);
