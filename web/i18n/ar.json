@@ -13,6 +13,7 @@
   "app.downloadingUpdateProgramWillClose": "جارٍ تنزيل التحديث… سيُغلق البرنامج ويُفتح من جديد.",
   "app.downloadingUpdateMb": "تنزيل التحديث… {done} من {total} ميجابايت",
   "app.installingUpdate": "جارٍ تثبيت التحديث… سيُغلق البرنامج ويُفتح من جديد.",
+  "app.updateCancelled": "أُلغي التحديث.",
   "app.phoneOn": "على الهاتف: يعمل",
   "app.phone": "على الهاتف",
   "app.tryAgain": "إعادة المحاولة",
