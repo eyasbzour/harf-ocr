@@ -51,3 +51,10 @@ test('a reading that comes back after the page changed is not offered on the new
   await out;
   assert.strictEqual(s.offer(b, f), null);
 });
+
+test('flags with no place on the photo are not sent at all', async () => {
+  const r = reader({});
+  const s = Spots.create(r);
+  assert.deepStrictEqual(await s.reread(page('a'), 'nuqta', [flag('ختم', null)]), []);
+  assert.strictEqual(r.asked.length, 0);
+});

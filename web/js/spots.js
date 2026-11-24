@@ -31,6 +31,7 @@
       // reads the flags' spots again with engine; resolves to their readings, kept for the page
       reread: function (p, engine, flags) {
         var withBox = flags.filter(function (f) { return f.box; });
+        if (!withBox.length) return Promise.resolve([]);  // nothing on the photo to read
         return read(p, engine, withBox.map(function (f) { return f.box; })).then(function (res) {
           on(p);
           return withBox.map(function (f, i) {
