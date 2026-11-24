@@ -669,6 +669,8 @@ fieldset > .btn { justify-self: start; }  /* a rare action, not a field: its own
 .line-pop .note-status > .i { color: var(--muted); }
 .line-which .btn { min-height: 1.75rem; padding-inline: .6rem; }
 .line-body, .line-result { display: grid; gap: .55rem; }
+/* one column the sheet's width: a long reader name in the reader list made it wider than a phone's screen */
+.note-pop, .line-body, .line-result { grid-template-columns: minmax(0, 1fr); }
 .line-crop { overflow: auto; max-height: 13rem; background: var(--well); border-radius: var(--r-ctl); overscroll-behavior: contain; }
 .line-crop canvas { display: block; }
 .line-shot { position: relative; width: max-content; min-width: 100%; }
