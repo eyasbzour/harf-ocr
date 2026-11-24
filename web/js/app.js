@@ -24,10 +24,12 @@
     onclick: (e) => { e.stopPropagation(); fn(); } }, icon(name));
   const uid = () => Math.random().toString(36).slice(2, 10);
   let toastTimer;
-  function toast(msg, isErr) {
+  // actions: [[label, onclick]], buttons after the text (it then stays longer, to be reached)
+  function toast(msg, isErr, actions = []) {
     const t = $('toast');
-    t.textContent = msg; t.className = 'toast' + (isErr ? ' err' : '');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), isErr ? 7000 : 3500);
+    t.replaceChildren(msg, ...actions.map(([label, fn]) => el('button', { type: 'button', class: 'toast-act', onclick: fn }, label)));
+    t.className = 'toast' + (isErr ? ' err' : '');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), isErr ? 7000 : actions.length ? 9000 : 3500);
   }
   async function api(path, opts = {}) {
     const res = await fetch(path, opts);
@@ -1591,18 +1593,22 @@
       });
       const name = (draft.name || tx('app.documentFallback')).replace(/[\\/:*?"<>|]+/g, '-');
       const docxBlob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      let saved;
       if (fmt === 'docx') {
-        download(docxBlob, name + '.docx');
+        saved = await download(docxBlob, name + '.docx');
       } else {
         toast(tx('app.converting'));
         const fd = new FormData();
         fd.append('file', docxBlob, 'document.docx'); fd.append('format', fmt); fd.append('name', name);
         const res = await fetch('/api/convert', { method: 'POST', body: fd });
         if (!res.ok) { let m = tx('app.errorStatus', { status: res.status }); try { m = I18N.message(await res.json()) || m; } catch (e) { /* */ } throw new Error(m); }
-        download(await res.blob(), filenameFrom(res, name + '.' + fmt));
+        saved = await download(await res.blob(), filenameFrom(res, name + '.' + fmt));
       }
+      if (saved === null) return;  // Save As cancelled
       const flags = draft.pages.reduce((n, p) => n + countFlags(p.blocks), 0);
-      toast(flags ? tx('app.fileExportedHighlightedSpotsNotes', { n: flags }) : tx('app.fileExported'));
+      const open = (folder) => () => api('/api/saved/open', jsonOpts('POST', { path: saved, folder })).catch((e) => toast(e.message, true));
+      toast(flags ? tx('app.fileExportedHighlightedSpotsNotes', { n: flags }) : tx('app.fileExported'), false,
+        saved ? [[tx('app.openFile'), open(false)], [tx('app.showInFolder'), open(true)]] : []);
       if (ws.dirty) ws.save();
     } catch (e) { toast(tx('app.couldntExportFile', { error: e.message }), true); }
   }
@@ -1615,9 +1621,16 @@
     if (saved && FORMATS.some((f) => f.id === saved && f.available)) sel.value = saved;
   }
 
-  function download(blob, filename) {
+  // The Windows program: Save As, in the folder saved to last; gives the path, or null when cancelled.
+  // A browser downloads it (''), the phone too.
+  async function download(blob, filename) {
+    if (typeof appVersion === 'string') {
+      const fd = new FormData(); fd.append('file', blob, filename); fd.append('name', filename);
+      try { return (await api('/api/save-as', { method: 'POST', body: fd })).path; } catch (e) { if (e.status !== 404) throw e; }
+    }
     const a = el('a', { href: URL.createObjectURL(blob), download: filename });
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    return '';
   }
   function filenameFrom(res, fallback) {
     const cd = res.headers.get('Content-Disposition') || '';
