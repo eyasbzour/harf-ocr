@@ -208,7 +208,7 @@ input[type=file] { min-height: 0; padding: .3rem; }
 body.in-draft .topbar { border-bottom-color: transparent; }  /* the title bar and the draft bar read as one toolbar */
 .brand { display: flex; gap: .65rem; align-items: center; font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; padding: .25rem; cursor: pointer; border-radius: var(--r-ctl); min-width: 0; }
 .brand-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.brand-mark { display: inline-grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: var(--r-ctl); background: var(--accent-fill); color: var(--accent-ink); flex-shrink: 0; }
+.brand-mark { display: block; width: 1.75rem; height: 1.75rem; flex-shrink: 0; }  /* the app's icon, web/icon.png */
 .topbar-actions { margin-inline-start: auto; display: flex; gap: .25rem; }
 
 /* the app's page is a column: the top bar, any bar under it (an update, readers downloading), then the view in what
