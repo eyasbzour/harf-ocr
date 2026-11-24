@@ -179,6 +179,26 @@ def restart(window) -> None:
     window.destroy()
 
 
+def save_as(window, name: str) -> str | None:
+    """Windows' Save As for an exported file, opening in the folder saved to last (Downloads at first). The path
+    chosen, or None when cancelled."""
+    import webview
+
+    remembered = LOCAL / "export-folder.txt"
+    folder = remembered.read_text(encoding="utf-8").strip() if remembered.exists() else ""
+    if not folder or not Path(folder).is_dir():
+        folder = str(Path.home() / "Downloads")
+    ext = Path(name).suffix.lstrip(".")
+    kind = webview.FileDialog.SAVE if hasattr(webview, "FileDialog") else webview.SAVE_DIALOG
+    got = window.create_file_dialog(kind, directory=folder, save_filename=name,
+                                    file_types=(f"{ext.upper()} (*.{ext})",) if ext else ())
+    path = got[0] if isinstance(got, (list, tuple)) else got
+    if not path:
+        return None
+    remembered.write_text(str(Path(path).parent), encoding="utf-8")
+    return str(path)
+
+
 def pick_port() -> int:
     saved = LOCAL / "port"
     try:
@@ -216,7 +236,7 @@ def main() -> None:
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", f"--lang={LANG}")
     import webview
 
-    webview.settings["ALLOW_DOWNLOADS"] = True  # produced files go to the Downloads folder
+    webview.settings["ALLOW_DOWNLOADS"] = True  # a file the page downloads goes to Downloads (exports use save_as)
     window = webview.create_window(TITLE, html=SPLASH, width=1440, height=920, min_size=(900, 600),
                                    background_color=BG[windows_theme()])
     port = pick_port()
@@ -230,6 +250,7 @@ def main() -> None:
 
             server.QUIT_APP[0] = window.destroy  # the updater closes the program this way
             server.RESTART_APP[0] = lambda: restart(window)
+            server.SAVE_AS[0] = lambda name: save_as(window, name)
             srv = state["server"] = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning"))
             thread = threading.Thread(target=srv.run, daemon=True, name="server")
             thread.start()
