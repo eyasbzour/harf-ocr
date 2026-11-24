@@ -687,6 +687,21 @@
     return added;
   }
 
+  // what was dropped: files, and the photos in dropped folders and their subfolders (read while the drop lasts:
+  // its items are gone after the handler returns)
+  function droppedFiles(dt) {
+    const entries = [...(dt.items || [])].map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+    if (!entries.some((en) => en.isDirectory)) return Promise.resolve([...dt.files]);
+    const walk = (en) => (en.isFile ? new Promise((res) => en.file(res, () => res(null))) : new Promise((res) => {
+      const reader = en.createReader(), all = [];
+      const next = () => reader.readEntries((batch) => {  // a folder comes in batches of up to 100
+        if (batch.length) { all.push(...batch); next(); } else Promise.all(all.map(walk)).then((fs) => res(fs.flat()));
+      }, () => res([]));
+      next();
+    }));
+    return Promise.all(entries.map(walk)).then((fs) => fs.flat().filter(Boolean));
+  }
+
   async function resortPages() {
     if (orderMode() === 'picked') { toast(tx('app.chooseSortOrder')); return; }
     if (!(await ask(tx('app.reorderAllPagesWay'), { ok: tx('app.reorder') }))) return;
@@ -1747,7 +1762,7 @@
     const pages = document.querySelector('.pages');
     pages.addEventListener('dragover', (e) => { e.preventDefault(); if (dragFrom == null) pages.classList.add('drag'); });
     pages.addEventListener('dragleave', () => pages.classList.remove('drag'));
-    pages.addEventListener('drop', (e) => { e.preventDefault(); pages.classList.remove('drag'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+    pages.addEventListener('drop', (e) => { e.preventDefault(); pages.classList.remove('drag'); if (e.dataTransfer.files.length) droppedFiles(e.dataTransfer).then(addFiles); });
 
     $('orderSel').value = store.get('order') || 'name';
     $('orderSel').onchange = () => store.set('order', $('orderSel').value, true);
@@ -1870,7 +1885,7 @@
     frame.addEventListener('drop', (e) => {
       frame.classList.remove('drag');
       if (!draft || draft.pages.length || !e.dataTransfer.files.length) return;
-      e.preventDefault(); addFiles(e.dataTransfer.files);
+      e.preventDefault(); droppedFiles(e.dataTransfer).then(addFiles);
     });
     document.querySelectorAll('.pane-tabs [role=tab]').forEach((t) => { t.onclick = () => setPane(t.dataset.pane); });
     // the word panel follows its word while the text scrolls, and closes once the word is out of view
