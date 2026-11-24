@@ -114,6 +114,7 @@
     const pad = parseFloat(getComputedStyle(box).paddingBottom) || 0;
     box.style.maxHeight = (items[n - 1].getBoundingClientRect().bottom - box.getBoundingClientRect().top + pad) + 'px';
   }
+  const mb = (n) => Math.round(n / 1048576).toLocaleString('en');  // bytes as whole megabytes, for the download bars
   let appVersion;  // the Windows program's version; null on a server (no updates there), undefined until asked
   async function checkUpdate(tries = 4) {
     let st;
@@ -139,9 +140,25 @@
     $('btnUpdate').onclick = async () => {
       if (!(await ask(tx('app.versionWillDownloadedInstalledProgram', { version: u.version }), { ok: tx('app.update') }))) return;
       if (draft && ws.dirty) await ws.save();
-      const busy = (on) => { $('btnUpdate').disabled = on; $('updateLater').disabled = on; };
       busy(true); $('updateText').textContent = tx('app.downloadingUpdateProgramWillClose');
-      try { await api('/api/update/install', { method: 'POST' }); } catch (e) { toast(e.message, true); busy(false); }
+      try { await api('/api/update/install', { method: 'POST' }); watch(); } catch (e) { toast(e.message, true); busy(false); }
+    };
+    const busy = (on) => {
+      $('btnUpdate').disabled = on; $('updateLater').disabled = on; $('updateProg').classList.toggle('hidden', !on);
+      if (!on) $('updateText').textContent = tx('app.newVersionProgramAvailable', { version: u.version });
+    };
+    // the download's share on the bar (server/updater.py), then the installer takes over and the program closes
+    const watch = async () => {
+      let st;
+      try { st = (await api('/api/update')).install; } catch (e) { return; }  // the program is closing
+      const prog = $('updateProg');
+      if (!st || st.state === 'error' || st.state === 'idle') { if (st && st.error) toast(I18N.message(st.error), true); busy(false); return; }
+      if (st.state === 'installing') { $('updateText').textContent = tx('app.installingUpdate'); prog.removeAttribute('value'); return; }
+      if (st.total) {
+        prog.value = st.done / st.total;
+        $('updateText').textContent = tx('app.downloadingUpdateMb', { done: mb(st.done), total: mb(st.total) });
+      }
+      setTimeout(watch, 500);
     };
   }
   // use on phone (the Windows program, on the PC; server/remote.py): the top bar's button shows while the link is open
@@ -804,7 +821,6 @@
       showPartsBox();
       return;
     }
-    const mb = (n) => Math.round(n / 1048576).toLocaleString('en');
     if (st.state === 'unpacking') { $('partsText').textContent = tx('app.unpackingExtraReaders'); prog.removeAttribute('value'); }
     else if (st.total) { $('partsText').textContent = tx('app.downloadingExtraReadersMb', { done: mb(st.done), total: mb(st.total) }); prog.value = st.done / st.total; }
     else { $('partsText').textContent = tx('app.downloadingExtraReaders'); prog.removeAttribute('value'); }

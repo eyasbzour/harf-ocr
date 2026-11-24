@@ -152,14 +152,15 @@ def update_check():
 
 
 @app.post("/api/update/install")
-async def update_install():
+def update_install():
+    """Starts it: the download runs on, /api/update says how far (install), then the program closes for the installer."""
     if not DESKTOP:
         return refuse(msg("server.updatingOnlyAvailableWindowsProgram"), 404)
     try:
-        await run_in_threadpool(updater.install, QUIT_APP[0])
+        updater.install(QUIT_APP[0])
     except Exception as e:
         return refuse(msg("server.couldntUpdate", error=e), 502)
-    return {"ok": True}
+    return updater.status()
 
 
 QUIT_APP = [lambda: os._exit(0)]  # desktop/app.py replaces it with closing its window
