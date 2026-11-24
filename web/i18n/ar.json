@@ -633,6 +633,7 @@
   "launcher.startingProgram": "جارٍ تشغيل البرنامج…",
   "launcher.starting": "جارٍ التشغيل",
   "launcher.programAlreadyOpen": "البرنامج مفتوح بالفعل.",
+  "launcher.closeProgramQuestion": "إغلاق البرنامج؟ ستتوقف أي قراءة جارية.",
   "launcher.programCouldntStartDetails": "تعذر تشغيل البرنامج. التفاصيل في:",
   "template.noHeader": "بدون ترويسة (صفحة عادية مع التاريخ)",
   "doc.uncertainReadingConfidenceCompareOriginal": "قراءة غير مؤكدة (درجة الثقة {conf}%)، قارن مع الصورة الأصلية",

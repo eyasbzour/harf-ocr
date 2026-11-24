@@ -166,7 +166,7 @@ def setup() -> None:
     os.chdir(APP / "server")
 
 
-def restart(window) -> None:
+def restart(close) -> None:
     """Close, and open again: a detached copy waits for this process to end (its single-instance lock goes
     with it), then starts the program."""
     import subprocess
@@ -176,7 +176,7 @@ def restart(window) -> None:
             "subprocess.Popen(sys.argv[2:])")
     subprocess.Popen([sys.executable, "-c", wait, str(os.getpid()), sys.executable, str(HERE / "app.py")],
                      close_fds=True, creationflags=subprocess.DETACHED_PROCESS)
-    window.destroy()
+    close()
 
 
 def save_as(window, name: str) -> str | None:
@@ -242,14 +242,29 @@ def main() -> None:
     port = pick_port()
     state: dict = {}
 
+    def close_now():  # the program closing itself (an update, a restart, a failed start): no question
+        state["leaving"] = True
+        window.destroy()
+
+    def closing():  # the user closing the window: asked first, as it ends the program and any reading in progress
+        if state.get("leaving"):
+            return True
+        try:
+            owner = window.native.Handle.ToInt64()
+        except Exception:
+            owner = None
+        rtl = 0x2000 | 0x80000 if language_file(LANG)[0]["dir"] == "rtl" else 0  # MB_RTLREADING | MB_RIGHT
+        # MB_YESNO | MB_ICONQUESTION; IDYES is 6
+        return ctypes.windll.user32.MessageBoxW(owner, tr("launcher.closeProgramQuestion"), TITLE, 0x4 | 0x20 | rtl) == 6
+
     def start_server():
         try:
             import uvicorn
 
             import main as server
 
-            server.QUIT_APP[0] = window.destroy  # the updater closes the program this way
-            server.RESTART_APP[0] = lambda: restart(window)
+            server.QUIT_APP[0] = close_now  # the updater closes the program this way
+            server.RESTART_APP[0] = lambda: restart(close_now)
             server.SAVE_AS[0] = lambda name: save_as(window, name)
             srv = state["server"] = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning"))
             thread = threading.Thread(target=srv.run, daemon=True, name="server")
@@ -268,7 +283,7 @@ def main() -> None:
         except Exception:
             traceback.print_exc()
             message(tr("launcher.programCouldntStartDetails") + "\n" + str(LOCAL / "logs" / "docscan.log"), error=True)
-            window.destroy()
+            close_now()
             return
         # PaddleOCR, the default reader, takes seconds to load: do it while the user picks a photo, once the page
         # has drawn. A read started meanwhile waits for it (paddle_engine's lock) instead of loading it twice.
@@ -292,6 +307,7 @@ def main() -> None:
             pass
 
     window.events.shown += shown
+    window.events.closing += closing
     webview.start(start_server, gui="edgechromium", private_mode=False, storage_path=str(LOCAL / "webview"))
     # the window is closed: stop the server and leave nothing running (readers may hold threads)
     if state.get("server"):

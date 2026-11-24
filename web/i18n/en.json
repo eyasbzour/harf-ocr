@@ -633,6 +633,7 @@
   "launcher.startingProgram": "Starting the program…",
   "launcher.starting": "Starting",
   "launcher.programAlreadyOpen": "The program is already open.",
+  "launcher.closeProgramQuestion": "Close Harf OCR? Any reading in progress will stop.",
   "launcher.programCouldntStartDetails": "The program couldn't start. The details are in:",
   "template.noHeader": "No header (a plain page with the date)",
   "doc.uncertainReadingConfidenceCompareOriginal": "Uncertain reading (confidence {conf}%). Compare it with the original photo.",
