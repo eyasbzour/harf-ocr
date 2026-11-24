@@ -85,6 +85,7 @@
   "app.photoRotatedReadPageAgain": "دُوِّرت الصورة. أعد قراءة الصفحة إذا كانت القراءة السابقة سيئة.",
   "app.photoSavedReadPageAgain": "حُفظت الصورة. أعد قراءة الصفحة لتستفيد من التعديل.",
   "app.photoSaved": "حُفظت الصورة.",
+  "app.sheetsCutFlattened": "صور الورق المصوَّر على مكتب قُصّت على حدود الورقة وسُوّيت. للتراجع عن إحداها: تحرير الصورة، ثم «استعادة الأصل».",
   "app.deletePageDraft": "حذف الصفحة {page} من المسودة؟",
   "app.addPhotosPagesReadThem": "أضف صور الصفحات أولاً، ثم اقرأها لتظهر هنا.",
   "app.pageOfTotal": "صفحة {page} من {total}",

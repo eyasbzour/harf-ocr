@@ -85,6 +85,7 @@
   "app.photoRotatedReadPageAgain": "The photo was rotated. Read the page again if the earlier reading was poor.",
   "app.photoSavedReadPageAgain": "The photo was saved. Read the page again to use the change.",
   "app.photoSaved": "The photo was saved.",
+  "app.sheetsCutFlattened": "Photos of a sheet on a desk were cut to the sheet and flattened. To undo one, open Edit photo and choose Restore original.",
   "app.deletePageDraft": "Delete page {page} from the draft?",
   "app.addPhotosPagesReadThem": "Add photos of the pages first, then read them to see them here.",
   "app.pageOfTotal": "Page {page} of {total}",

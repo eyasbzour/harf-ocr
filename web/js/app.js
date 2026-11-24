@@ -670,16 +670,20 @@
     const cmp = ORDERERS[orderMode()];
     items.sort((a, b) => cmp(a, b) || a.k - b.k);
     ws.flush();
-    let added = 0;
+    let added = 0, cut = 0;
     for (const it of items) {
       const fd = new FormData(); fd.append('file', it.f);
+      fd.append('fit', '1');  // a sheet photographed on a desk: cut out and flattened, the photo as taken kept (sheet.py)
       try {
         const r = await api(`/api/drafts/${draft.id}/images`, { method: 'POST', body: fd });
-        ws.addPages([{ id: uid(), image: r.name, file: it.file, fileTime: it.fileTime, rotation: 0, blocks: null, versions: [] }]);
+        const page = { id: uid(), image: r.name, file: it.file, fileTime: it.fileTime, rotation: 0, blocks: null, versions: [] };
+        if (r.original) { Object.assign(page, { original: r.original, edited: true }); cut++; }  // Restore original undoes it
+        ws.addPages([page]);
         added++; renderPages();
       } catch (e) { toast(tx('app.couldntUpload', { file: it.file, error: e.message }), true); }
     }
     if (added && draft.pages.length === added) showPage(0);
+    if (cut) toast(tx('app.sheetsCutFlattened'));
     return added;
   }
 

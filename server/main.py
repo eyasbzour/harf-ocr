@@ -364,11 +364,11 @@ def delete_draft(draft_id: str):
 
 
 @app.post("/api/drafts/{draft_id}/images")
-def upload_image(draft_id: str, file: UploadFile = File(...)):
+def upload_image(draft_id: str, file: UploadFile = File(...), fit: bool = Form(False)):
     raw = file.file.read(MAX_UPLOAD + 1)
     if len(raw) > MAX_UPLOAD:
         _err(413, msg("server.photoTooLargeLimitMb", limit=MAX_UPLOAD // 1024 ** 2))
-    return STORE.add_image(draft_id, raw)
+    return STORE.add_image(draft_id, raw, fit)  # fit: a photographed sheet, cut out and flattened
 
 
 @app.get("/api/drafts/{draft_id}/images/{name}")
