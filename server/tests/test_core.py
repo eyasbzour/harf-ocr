@@ -349,3 +349,11 @@ def test_underlined_and_bold_words_keep_their_style():
             assert w.fmt == ({kind: True} if w.text in styled else {}), (w.text, w.fmt)
     # and they reach the editor as styled pieces, the space after them plain
     assert words_to_segs(lines[0].words[2:6], 65) == [{"s": "the "}, {"s": "attached report", "u": True}, {"s": " "}, {"s": "before"}]
+
+
+def test_windows_reader_keeps_english_runs_left_to_right():
+    from engines.common import Word
+    from engines.windows_engine import _rtl_order
+    # one box a word, right to left as on an Arabic page: the English run turns back around, its number with it
+    words = [Word(t, 100, None) for t in ["راجع", "report", "attached", "the", "2026", "اليوم"]]
+    assert [w.text for w in _rtl_order(words)] == ["راجع", "2026", "the", "attached", "report", "اليوم"]

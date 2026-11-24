@@ -1,5 +1,5 @@
 # The Windows program's base (desktop/build.ps1 installs it into the embedded Python): the server, the window,
-# Tesseract's wrapper, PaddleOCR, Word / pypdfium2 for PDF, ODT, TXT and PNG, and segno for the phone link's QR code.
+# Tesseract's wrapper, PaddleOCR, Windows' own reader (winrt, server/engines/windows_engine.py), Word / pypdfium2 for PDF, ODT, TXT and PNG, and segno for the phone link's QR code.
 fastapi>=0.115
 uvicorn>=0.30
 python-multipart>=0.0.9
@@ -14,3 +14,10 @@ pypdfium2>=4.30
 segno>=1.6
 paddlepaddle==3.3.1
 paddleocr==3.7.0
+winrt-runtime>=3.2
+winrt-Windows.Media.Ocr>=3.2
+winrt-Windows.Graphics.Imaging>=3.2
+winrt-Windows.Globalization>=3.2
+winrt-Windows.Foundation>=3.2
+winrt-Windows.Foundation.Collections>=3.2
+winrt-Windows.Storage.Streams>=3.2
