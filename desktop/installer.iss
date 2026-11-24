@@ -14,7 +14,7 @@
 
 [Setup]
 AppId={{6F2B8C4E-1D7A-4E59-9C1B-3A5E7D2F8B90}
-; the AppId, AppMutex and AppUserModelID keep their DocScan-era values: 1.0.2 is updated in place
+; the AppId, the program mutex and AppUserModelID keep their DocScan-era values: 1.0.2 is updated in place
 AppName=Harf OCR
 AppVerName=Harf OCR {#AppVersion}
 AppVersion={#AppVersion}
@@ -45,8 +45,7 @@ LZMANumBlockThreads=4
 ; libpaddle.pyd): the compressor runs in its own 64-bit process instead
 LZMAUseSeparateProcess=yes
 WizardStyle=modern
-; the program's own single-instance mutex: setup asks to close a running copy
-AppMutex=Local\DocScan.single
+; the program's single-instance mutex (desktop/app.py) is checked in [Code] InitializeSetup, not by AppMutex
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=auto
@@ -117,11 +116,24 @@ var
   DownloadPage: TDownloadWizardPage;
   Fresh: Boolean;
 
-// before anything is installed: no earlier copy of the program (its uninstall entry; the GUID is AppId above)
+// before anything is installed: no earlier copy of the program (its uninstall entry; the GUID is AppId above), and the
+// program closed. An update starts this silently and closes the program a moment later (server/updater.py): wait for
+// it to go, up to a minute. AppMutex asked at once instead, and a silent setup answers "close it first" with Cancel,
+// so an update closed the program and installed nothing.
 function InitializeSetup: Boolean;
+var
+  Waited: Integer;
 begin
   Fresh := not RegKeyExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F2B8C4E-1D7A-4E59-9C1B-3A5E7D2F8B90}_is1');
+  Waited := 0;
+  while WizardSilent and CheckForMutexes('Local\DocScan.single') and (Waited < 60000) do begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
   Result := True;
+  while Result and CheckForMutexes('Local\DocScan.single') do
+    Result := SuppressibleMsgBox(FmtMessage(SetupMessage(msgSetupAppRunningError), ['{#SetupSetting("AppName")}']),
+      mbError, MB_OKCANCEL, IDCANCEL) = IDOK;
 end;
 
 function IsFreshInstall: Boolean;
