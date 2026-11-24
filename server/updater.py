@@ -80,7 +80,8 @@ def install(quit_app) -> None:
     with urllib.request.urlopen(req, timeout=60) as r, open(path, "wb") as f:
         while chunk := r.read(1 << 20):
             f.write(chunk)
-    # /SILENT shows only progress; the installer closes and reopens the program (RestartApplications).
+    # /SILENT shows only progress. The installer waits for the program to close (installer.iss InitializeSetup;
+    # quit_app below) and opens it again after (its [Run] entry).
     # Its log goes next to the program's (desktop/app.py), to see why an update did not install.
     log = os.path.join(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()), "DocScan", "logs", "setup.log")
     subprocess.Popen([path, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS",
